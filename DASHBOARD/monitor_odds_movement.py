@@ -1,49 +1,47 @@
-import json
 import os
 import re
-
-# Get the absolute directory containing the odds files dynamically
-directory = os.path.abspath(os.path.join(os.path.dirname(__file__), 'data'))
+import json
+import csv  # Importing the csv module
 
 # Function to dynamically load JSON files based on timestamps
 def load_files(directory):
-    # Use regex to extract datetime from filenames (assuming filenames follow the same pattern)
     files = [f for f in os.listdir(directory) if re.match(r'nfl_odds_vsin_\d{8}_\d{4}\.json', f)]
-    # Sort files by datetime in the filename
     files.sort(key=lambda x: re.findall(r'(\d{8}_\d{4})', x)[0])
     return files
 
-# Function to format odds (to deal with multiline strings for favorite/underdog odds)
+# Function to format odds
 def format_odds(odds):
     return odds.replace("\n", " | ")
 
-# Function to compare odds between two datasets and include the date in the output
+# Function to compare odds between two datasets
 def detect_odds_movement(odds_before, odds_after):
     movements = []
     
-    # Loop through games in odds_before
     for game_before, game_after in zip(odds_before, odds_after):
-        if game_before['Time'] == game_after['Time']:  # Match games by time
+        if game_before['Time'] == game_after['Time']:
+            game_date_column_name = list(game_before.keys())[1]  # Assuming the second key is the date
             
-            # Extract the date from the second column (column name)
-            game_date_column_name = list(game_before.keys())[1]  # The actual column name for the date
-            
-            # Compare odds from different sportsbooks
             for key in game_before:
                 if key not in ["Time", game_date_column_name] and key in game_after:
-                    if game_before[key] != game_after[key]:  # Check if odds have changed
+                    if game_before[key] != game_after[key]:
                         movements.append({
-                            'game_time': game_before['Time'],
-                            'game_date_column_name': game_date_column_name,  # Save the actual column name
-                            'game_date_value': game_before[game_date_column_name],  # Save the value of the date column
+                            'game_time': game_before['Time'],  # Game time is stored
+                            'game_date_column_name': game_date_column_name,
+                            'game_date_value': game_before[game_date_column_name],
                             'sportsbook': key,
                             'odds_before': format_odds(game_before[key]),
                             'odds_after': format_odds(game_after[key])
                         })
     return movements
 
+# Directory containing the odds files
+directory = 'data/'
+
 # Load and sort files
 files = load_files(directory)
+
+# List to hold all detected movements for CSV
+all_movements = []
 
 # Loop through consecutive files and compare odds
 for i in range(len(files) - 1):
@@ -57,15 +55,29 @@ for i in range(len(files) - 1):
     # Detect movements between consecutive files
     odds_movements = detect_odds_movement(odds_before, odds_after)
     
-    # Output movements
     if odds_movements:
-        print(f"\nODDS MOVEMENT DETECTED {file1} and {file2}:\n")
         for movement in odds_movements:
-            print(f"Game Date Column: {movement['game_date_column_name']}")
-            print(f"Matchup: {movement['game_date_value'].replace('\n', ' vs').strip()}")
-            print(f"Sportsbook: {movement['sportsbook']}")
-            print(f"Odds before: {movement['odds_before']}")
-            print(f"Odds after: {movement['odds_after']}")
-            print("")
+            all_movements.append({
+                'file1': file1,
+                'file2': file2,
+                'game_date': movement['game_date_column_name'],  # Save the matchup column name
+                'game_time': movement['game_time'],  # Use game_time directly
+                'matchup': f"{movement['game_date_value'].replace('\n', ' vs').strip()}",
+                'sportsbook': movement['sportsbook'],
+                'odds_before': movement['odds_before'],
+                'odds_after': movement['odds_after']
+            })
     else:
         print(f"No odds movement detected between {file1} and {file2}.")
+
+# Save movements to a CSV file
+csv_file_path = 'data/odds_movements.csv'
+with open(csv_file_path, mode='w', newline='') as csv_file:
+    fieldnames = ['file1', 'file2', 'game_date', 'game_time', 'matchup', 'sportsbook', 'odds_before', 'odds_after']
+    writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+
+    writer.writeheader()  # Write the header
+    for movement in all_movements:
+        writer.writerow(movement)  # Write each movement
+
+print(f"Odds movements saved to {csv_file_path}")
