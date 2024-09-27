@@ -3,6 +3,14 @@ import re
 import json
 import csv  # Importing the csv module
 
+# Delete empty files right at the beginning
+files = os.listdir('data')
+for file in files:
+    file_path = os.path.join('data', file)
+    if os.path.isfile(file_path) and os.stat(file_path).st_size == 0:
+        print(f"Deleting empty file: {file}")
+        os.remove(file_path)
+
 # Function to dynamically load JSON files based on timestamps
 def load_files(directory):
     files = [f for f in os.listdir(directory) if re.match(r'nfl_odds_vsin_\d{8}_\d{4}\.json', f)]
@@ -51,7 +59,24 @@ for i in range(len(files) - 1):
     with open(os.path.join(directory, file1)) as f1, open(os.path.join(directory, file2)) as f2:
         odds_before = json.load(f1)
         odds_after = json.load(f2)
+# # Loop through consecutive files and compare odds
+# for i in range(len(files) - 1):
+#     file1 = files[i]
+#     file2 = files[i + 1]
     
+#     with open(os.path.join(directory, file1)) as f1, open(os.path.join(directory, file2)) as f2:
+#         # Check if the files are empty before loading them
+#         if os.stat(f1.name).st_size == 0:
+#             print(f"File {f1.name} is empty.")
+#             continue
+
+#         if os.stat(f2.name).st_size == 0:
+#             print(f"File {f2.name} is empty.")
+#             continue
+        
+#         odds_before = json.load(f1)
+#         odds_after = json.load(f2)
+  
     # Detect movements between consecutive files
     odds_movements = detect_odds_movement(odds_before, odds_after)
     
@@ -68,7 +93,8 @@ for i in range(len(files) - 1):
                 'odds_after': movement['odds_after']
             })
     else:
-        print(f"No odds movement detected between {file1} and {file2}.")
+        # print(f"No odds movement detected between {file1} and {file2}.")
+        pass
 
 # Save movements to a CSV file
 csv_file_path = 'data/odds_movements.csv'
