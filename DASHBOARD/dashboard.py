@@ -13,12 +13,16 @@ app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 def load_odds_movements():
     odds_movements = pd.read_csv('data/nfl_odds_movements.csv')
 
-    # Clean data
-    odds_movements['game_date'] = odds_movements['game_date'].str.replace(' ', '').str.strip().str.lower()
-    odds_movements['game_time'] = odds_movements['game_time'].str.replace('\n', ' ').str.replace(r'\s+', ' ', regex=True).str.strip().str.lower()
-    odds_movements['matchup'] = odds_movements['matchup'].str.replace(r'\s+', ' ', regex=True).str.strip().str.lower()
+    # Clean data using .loc to avoid SettingWithCopyWarning
+    odds_movements.loc[:, 'game_date'] = odds_movements['game_date'].str.replace(' ', '').str.strip().str.lower()
+    odds_movements.loc[:, 'game_time'] = odds_movements['game_time'].str.replace('\n', ' ').str.replace(r'\s+', ' ', regex=True).str.strip().str.lower()
+    odds_movements.loc[:, 'matchup'] = odds_movements['matchup'].str.replace(r'\s+', ' ', regex=True).str.strip().str.lower()
 
-    return odds_movements
+    # Filter for specific sportsbooks
+    sportsbooks_to_include = ['Circa', 'Westgate', 'South Point', 'DK']
+    filtered_odds = odds_movements[odds_movements['sportsbook'].isin(sportsbooks_to_include)].copy()  # Make a copy to avoid issues
+
+    return filtered_odds
 
 odds_movements = load_odds_movements()
 
@@ -30,7 +34,7 @@ def load_games_data():
     data_dir = os.path.join(os.path.dirname(__file__), 'data')
 
     # Get all JSON files and sort them by their timestamp (assuming the filenames include a timestamp)
-    json_files = sorted([f for f in os.listdir(data_dir) if f.endswith(".json")], reverse=True)
+    json_files = sorted([f for f in os.listdir(data_dir) if f.endswith(".json") and f.startswith('nfl')], reverse=True)
 
     # Use the most recent file (the first in the sorted list)
     most_recent_file = json_files[0] if json_files else None
