@@ -13,7 +13,7 @@ import time
 
 ### UFC ###
 
-time.sleep(20)
+time.sleep(30)
 
 # Configure Chrome options
 chrome_options = Options()
