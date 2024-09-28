@@ -97,7 +97,7 @@ for i in range(len(files) - 1):
         pass
 
 # Save movements to a CSV file
-csv_file_path = 'data/odds_movements.csv'
+csv_file_path = 'data/nfl_odds_movements.csv'
 with open(csv_file_path, mode='w', newline='') as csv_file:
     fieldnames = ['file1', 'file2', 'game_date', 'game_time', 'matchup', 'sportsbook', 'odds_before', 'odds_after']
     writer = csv.DictWriter(csv_file, fieldnames=fieldnames)

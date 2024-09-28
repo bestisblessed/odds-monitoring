@@ -11,7 +11,7 @@ app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 # Load odds movements data from the CSV file
 def load_odds_movements():
-    odds_movements = pd.read_csv('data/odds_movements.csv')
+    odds_movements = pd.read_csv('data/nfl_odds_movements.csv')
 
     # Clean data
     odds_movements['game_date'] = odds_movements['game_date'].str.replace(' ', '').str.strip().str.lower()

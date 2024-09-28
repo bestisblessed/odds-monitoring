@@ -3,7 +3,8 @@
 rm -rf data/*
 rm data_backup.zip
 
-ssh Neo "zip -r /Users/neo/odds-monitoring/data_backup.zip /Users/neo/odds-monitoring/data"
+# ssh Neo "zip -r /Users/neo/odds-monitoring/data_backup.zip /Users/neo/odds-monitoring/data"
+ssh Neo "cd /Users/neo/odds-monitoring/ && zip -r data_backup.zip data"
 
 scp -r Neo:~/odds-monitoring/data_backup.zip .
 unzip data_backup.zip -d data/
@@ -11,7 +12,7 @@ unzip data_backup.zip -d data/
 
 echo ''
 
-python monitor_odds_movement.py
+python nfl_monitor_odds_movement.py
 
 echo ''
 
