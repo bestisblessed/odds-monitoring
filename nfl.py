@@ -3,6 +3,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.chrome.service import Service  # Import Service
 from selenium.webdriver.support import expected_conditions as EC
 import json
 import datetime
@@ -12,12 +13,11 @@ from datetime import datetime
 
 ### NFL ###
 
-# Configure Chrome options
+chromedriver_path = "/usr/local/bin/chromedriver"
 chrome_options = Options()
 chrome_options.add_argument("--headless")  # Run Chrome in headless mode
-
-# Initialize the Chrome WebDriver with the options
-driver = webdriver.Chrome(options=chrome_options)
+service = Service(chromedriver_path)
+driver = webdriver.Chrome(service=service, options=chrome_options)
 
 # Navigate to the URL
 url = 'https://data.vsin.com/nfl/vegas-odds-linetracker/'

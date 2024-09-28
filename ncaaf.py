@@ -15,12 +15,11 @@ import time
 
 time.sleep(10)
 
-# Configure Chrome options
+chromedriver_path = "/usr/local/bin/chromedriver"
 chrome_options = Options()
 chrome_options.add_argument("--headless")  # Run Chrome in headless mode
-
-# Initialize the Chrome WebDriver with the options
-driver = webdriver.Chrome(options=chrome_options)
+service = Service(chromedriver_path)
+driver = webdriver.Chrome(service=service, options=chrome_options)
 
 # Navigate to the URL
 url = 'https://data.vsin.com/college-football/vegas-odds-linetracker/'
