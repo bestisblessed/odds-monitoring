@@ -1,13 +1,14 @@
 #!/bin/bash
 
-rm -rf data/*
+rm -rf data
 rm data_backup.zip
 
 # ssh Neo "zip -r /Users/neo/odds-monitoring/data_backup.zip /Users/neo/odds-monitoring/data"
+#ssh Neo "cd /Users/neo/odds-monitoring/ && rm data_backup.zip && zip -r data_backup.zip data"
 ssh Neo "cd /Users/neo/odds-monitoring/ && zip -r data_backup.zip data"
 
 scp -r Neo:~/odds-monitoring/data_backup.zip .
-unzip data_backup.zip -d data/
+unzip data_backup.zip -d .
 #scp -r Neo:~/odds-monitoring/data .
 
 echo ''
