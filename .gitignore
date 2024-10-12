@@ -3,3 +3,4 @@ data/
 *.zip
 bak/
 __pycache__*
+.vscode/
