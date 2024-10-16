@@ -1,6 +1,7 @@
 #!/bin/bash
 
-current_date=$(date +%^b_%d_%y)
+#current_date=$(date +%^b_%d_%y)
+current_date=$(date +%b_%d_%y | tr '[:lower:]' '[:upper:]')
 
 mkdir -p zips
 zip -r zips/data_backup_${current_date}.zip data
