@@ -103,11 +103,12 @@ for table in tables:
 df = pd.DataFrame(all_data, columns=headers)
 
 # Make directory if it doesn't exist
-output_dir = "data/injury-reports"
+script_dir = os.path.dirname(os.path.abspath(__file__))
+output_dir = os.path.join(script_dir, "data/injury-reports")
 os.makedirs(output_dir, exist_ok=True)
 
 today_date = datetime.now().strftime("%Y-%m-%d")
-csv_file_path = f"{output_dir}/nfl_injury_status_{today_date}.csv"
+csv_file_path = os.path.join(output_dir, f"nfl_injury_status_{today_date}.csv")
 df.to_csv(csv_file_path, index=False)
 
 # Close the browser
