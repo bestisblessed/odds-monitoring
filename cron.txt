@@ -1,0 +1,5 @@
+### Odds Monitor ###
+1-59/3 * * * * $HOME/.pyenv/shims/python $HOME/odds-monitoring/nfl.py >> $HOME/odds-monitoring/nfl.log 2>&1
+2-59/3 * * * * $HOME/.pyenv/shims/python $HOME/odds-monitoring/ncaaf.py >> $HOME/odds-monitoring/ncaaf.log 2>&1
+3-59/3 * * * * $HOME/.pyenv/shims/python $HOME/odds-monitoring/ufc.py >> $HOME/odds-monitoring/ufc.log 2>&1
+0 12 * * * $HOME/.pyenv/shims/python $HOME/odds-monitoring/nfl_injury_reports.py >> $HOME/odds-monitoring/logs/nfl_injury_reports.log 2>&1
