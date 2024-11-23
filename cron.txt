@@ -1,3 +1,5 @@
+export HOME=/home/trinity
+
 ### Odds Monitor ###
 1-59/3 * * * * $HOME/.pyenv/shims/python $HOME/odds-monitoring/nfl.py >> $HOME/odds-monitoring/nfl.log 2>&1
 2-59/3 * * * * $HOME/.pyenv/shims/python $HOME/odds-monitoring/ncaaf.py >> $HOME/odds-monitoring/ncaaf.log 2>&1
