@@ -11,6 +11,7 @@ import os
 import time
 import re
 import subprocess
+from datetime import datetime
 os.makedirs('data/props', exist_ok=True)
 GAME_IDS = {
     'bovada': "arizona-cardinals-seattle-seahawks-202411241625",
@@ -18,6 +19,7 @@ GAME_IDS = {
     'hard_rock': "2601225827775152149",
     'betonline': "490538675"
 }
+TIMESTAMP = datetime.now().strftime('%Y%m%d_%H%M%S')
 try:
     chromedriver_path = subprocess.check_output(['which', 'chromedriver']).strip().decode('utf-8')
 except subprocess.CalledProcessError:
@@ -141,7 +143,7 @@ for tab_name, tab_xpath in bovada_tabs.items():
                     })
         if props_data:
             df = pd.DataFrame(props_data)
-            df.to_csv(f"data/props/bovada_{tab_name.lower().replace(' ', '_')}.csv", index=False)
+            df.to_csv(f"data/props/bovada_{tab_name.lower().replace(' ', '_')}_{TIMESTAMP}.csv", index=False)
             print(f"Saved {len(df)} props from {tab_name}")
     except Exception as e:
         print(f"Error processing Bovada {tab_name}: {e}")
@@ -172,7 +174,7 @@ for section in props_sections:
         ])
 if lines_data:
     df = pd.DataFrame(lines_data, columns=['Description', 'Points', 'Odds', 'Prop Type'])
-    df.to_csv('data/props/mybookieag_nfl_props.csv', index=False)
+    df.to_csv(f'data/props/mybookieag_nfl_props_{TIMESTAMP}.csv', index=False)
     print(f"Saved {len(df)} MyBookie props")
 
 ### Hard Rock ###
@@ -208,7 +210,7 @@ for tab_name, tab_xpath in hard_rock_tabs.items():
         print(f"Error processing Hard Rock {tab_name}: {e}")
 if all_props_data:
     df = pd.DataFrame(all_props_data, columns=['Tab', 'Market', 'Selection', 'Odds'])
-    df.to_csv('data/props/hard_rock_nfl_props.csv', index=False)
+    df.to_csv(f'data/props/hard_rock_nfl_props_{TIMESTAMP}.csv', index=False)
     print(f"Saved {len(df)} Hard Rock props")
 
 ### BetOnline ###
@@ -239,7 +241,7 @@ try:
                     props_data.append([team_name, prop_section_name, prop_type, prop_value])
     if props_data:
         df = pd.DataFrame(props_data, columns=['Team Name', 'Prop Section', 'Prop Type', 'Value'])
-        df.to_csv('data/props/betonline_nfl_props.csv', index=False)
+        df.to_csv(f'data/props/betonline_nfl_props_{TIMESTAMP}.csv', index=False)
         print(f"Saved {len(df)} BetOnline props")
 except Exception as e:
     print(f"Error scraping BetOnline: {e}")
