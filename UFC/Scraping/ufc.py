@@ -2,32 +2,30 @@ import selenium
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.service import Service  # Import Service
 import json
 import datetime
 import csv
 import os
 from datetime import datetime
-import time
+import subprocess
 
-### UFC ###
-
-time.sleep(30)
-
-
-chromedriver_path = "/usr/local/bin/chromedriver"
-# chromedriver_path = "/opt/homebrew/bin/chromedriver"
+# Find chromedriver path using 'which'
+try:
+    chromedriver_path = subprocess.check_output(['which', 'chromedriver']).strip().decode('utf-8')
+except subprocess.CalledProcessError:
+    raise RuntimeError("ChromeDriver not found. Please ensure it is installed and in your PATH.")
 
 # Configure Chrome options
 chrome_options = Options()
-chrome_options.add_argument("--headless")  # Run Chrome in headless mode
-
-# Specify the Service for ChromeDriver with the path
-service = Service(chromedriver_path)
+chrome_options.add_argument("--headless")
+chrome_options.add_argument("--no-sandbox")  # Required for running on Raspberry Pi
+chrome_options.add_argument("--disable-dev-shm-usage")  # Required for running on Raspberry Pi
 
 # Initialize the Chrome WebDriver with the options and service
+service = Service(chromedriver_path)
 driver = webdriver.Chrome(service=service, options=chrome_options)
 
 # Navigate to the URL
