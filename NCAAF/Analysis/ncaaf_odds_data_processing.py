@@ -2,6 +2,9 @@ import os
 import re
 import json
 import csv  # Importing the csv module
+import shutil
+
+shutil.copytree('../Scraping/data', 'data', dirs_exist_ok=True)
 
 # Delete empty files right at the beginning
 files = os.listdir('data')
