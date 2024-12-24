@@ -9,7 +9,7 @@ import re
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 def load_odds_movements():
-    odds_movements = pd.read_csv('data/nfl_odds_movements.csv')
+    odds_movements = pd.read_csv('data/odds/nfl_odds_movements.csv')
     odds_movements.loc[:, 'game_date'] = odds_movements['game_date'].str.replace(' ', '').str.strip().str.lower()
     odds_movements.loc[:, 'game_time'] = odds_movements['game_time'].str.replace('\n', ' ').str.replace(r'\s+', ' ', regex=True).str.strip().str.lower()
     odds_movements.loc[:, 'matchup'] = odds_movements['matchup'].str.replace(r'\s+', ' ', regex=True).str.strip().str.lower()
@@ -21,7 +21,7 @@ odds_movements = load_odds_movements()
 
 def load_games_data():
     games_data = []
-    data_dir = os.path.join(os.path.dirname(__file__), 'data')
+    data_dir = os.path.join(os.path.dirname(__file__), 'data/odds')
     json_files = sorted([f for f in os.listdir(data_dir) if f.endswith(".json") and f.startswith('nfl')], reverse=True)
     most_recent_file = json_files[0] if json_files else None
     if most_recent_file:

@@ -3,9 +3,10 @@
 rm -rf data/
 # mkdir -p data/odds/
 
-ssh Neo "cd /Users/neo/odds-monitoring && rm nfl_odds_vsin_2024.zip && if ls data/nfl_odds_vsin_2024* 1> /dev/null 2>&1; then zip -v nfl_odds_vsin_2024.zip data/nfl_odds_vsin_2024*; echo 'Files zipped successfully'; else echo 'No files found matching the pattern'; fi"
-scp Neo:/Users/neo/odds-monitoring/nfl_odds_vsin_2024.zip .
-unzip nfl_odds_vsin_2024.zip
+# ssh Neo "cd /Users/neo/odds-monitoring && rm nfl_odds_vsin_2024.zip && if ls data/nfl_odds_vsin_2024* 1> /dev/null 2>&1; then zip -v nfl_odds_vsin_2024.zip data/nfl_odds_vsin_2024*; echo 'Files zipped successfully'; else echo 'No files found matching the pattern'; fi"
+# scp Neo:/Users/neo/odds-monitoring/nfl_odds_vsin_2024.zip .
+# unzip nfl_odds_vsin_2024.zip
+cp -r ../NFL/Scraping/data .
 
 # rm data_backup.zip
 # scp -r Neo:/Users/neo/odds-monitoring/data/ data/odds/

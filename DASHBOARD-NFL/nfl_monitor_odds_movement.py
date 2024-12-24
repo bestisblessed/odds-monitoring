@@ -5,9 +5,9 @@ import csv
 import pandas as pd
 from datetime import datetime
 
-files = os.listdir('data')
+files = os.listdir('data/odds')
 for file in files:
-    file_path = os.path.join('data', file)
+    file_path = os.path.join('data/odds', file)
     if os.path.isfile(file_path) and os.stat(file_path).st_size == 0:
         print(f"Deleting empty file: {file}")
         os.remove(file_path)
@@ -34,7 +34,7 @@ def detect_odds_movement(odds_before, odds_after):
                             'odds_after': format_odds(game_after[key])
                         })
     return movements
-directory = 'data/'
+directory = 'data/odds'
 files = load_files(directory)
 all_movements = []
 for i in range(len(files) - 1):
@@ -58,7 +58,7 @@ for i in range(len(files) - 1):
             })
     else:
         pass
-csv_file_path = 'data/nfl_odds_movements.csv'
+csv_file_path = 'data/odds/nfl_odds_movements.csv'
 with open(csv_file_path, mode='w', newline='') as csv_file:
     fieldnames = ['file1', 'file2', 'game_date', 'game_time', 'matchup', 'sportsbook', 'odds_before', 'odds_after']
     writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
@@ -66,7 +66,7 @@ with open(csv_file_path, mode='w', newline='') as csv_file:
     for movement in all_movements:
         writer.writerow(movement)  
 print(f"Odds movements saved to {csv_file_path}")
-file_path = 'data/nfl_odds_movements.csv'  
+file_path = 'data/odds/nfl_odds_movements.csv'  
 nfl_odds_data = pd.read_csv(file_path)
 nfl_odds_data[['team_1', 'team_2']] = nfl_odds_data['matchup'].str.split(' vs ', expand=True)
 nfl_odds_data[['team1_odds_before', 'team2_odds_before']] = nfl_odds_data['odds_before'].str.split(r'\s+\|\s+', expand=True)
@@ -87,13 +87,13 @@ nfl_odds_data['time_before'] = nfl_odds_data['time_before'].apply(lambda dt: dt.
 nfl_odds_data['time_after'] = nfl_odds_data['time_after'].apply(lambda dt: dt.strftime('%b %d %-I:%M%p') if pd.notnull(dt) else None)
 # nfl_odds_data = nfl_odds_data.drop(columns=['odds_before', 'odds_after', 'file1', 'file2'])
 print(nfl_odds_data[['team_1', 'team_2', 'team1_odds_before', 'team2_odds_before', 'team1_odds_after', 'team2_odds_after']].head())
-nfl_odds_data = nfl_odds_data.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+nfl_odds_data = nfl_odds_data.map(lambda x: x.strip() if isinstance(x, str) else x)
 nfl_odds_data.to_csv(file_path, index=False)  
-nfl_odds_data = pd.read_csv('data/nfl_odds_movements.csv')
+nfl_odds_data = pd.read_csv('data/odds/nfl_odds_movements.csv')
 circa_odds_data = nfl_odds_data[nfl_odds_data['sportsbook'] == 'Circa']
-circa_odds_data = circa_odds_data.applymap(lambda x: x.strip() if isinstance(x, str) else x)
-circa_odds_data.to_csv('data/nfl_odds_movements_circa.csv', index=False)
-nfl_odds_data = pd.read_csv('data/nfl_odds_movements.csv')
+circa_odds_data = circa_odds_data.map(lambda x: x.strip() if isinstance(x, str) else x)
+circa_odds_data.to_csv('data/odds/nfl_odds_movements_circa.csv', index=False)
+nfl_odds_data = pd.read_csv('data/odds/nfl_odds_movements.csv')
 dk_odds_data = nfl_odds_data[nfl_odds_data['sportsbook'] == 'DK']
-dk_odds_data = dk_odds_data.applymap(lambda x: x.strip() if isinstance(x, str) else x)
-dk_odds_data.to_csv('data/nfl_odds_movements_dk.csv', index=False)
+dk_odds_data = dk_odds_data.map(lambda x: x.strip() if isinstance(x, str) else x)
+dk_odds_data.to_csv('data/odds/nfl_odds_movements_dk.csv', index=False)
