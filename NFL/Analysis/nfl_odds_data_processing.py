@@ -100,3 +100,68 @@ nfl_odds_data = pd.read_csv('data/nfl_odds_movements.csv')
 dk_odds_data = nfl_odds_data[nfl_odds_data['sportsbook'] == 'DK']
 dk_odds_data = dk_odds_data.map(lambda x: x.strip() if isinstance(x, str) else x)
 dk_odds_data.to_csv('data/nfl_odds_movements_dk.csv', index=False)
+
+
+
+### Filter dates ###
+import pandas as pd
+from datetime import datetime, timedelta
+import os
+import glob
+
+print("\nExample format: 20241223 (for Dec 23, 2024)")
+starter_date_default = '20241223'
+current_date = datetime.now().strftime('%Y%m%d')
+
+# Get start date with default
+start_date = input(f"Enter start date (YYYYMMDD) [press Enter for {starter_date_default}]: ").strip()
+if not start_date:
+    start_date = starter_date_default
+
+# Get end date with default (1 week after start date)
+start_dt = datetime.strptime(start_date, '%Y%m%d')
+default_end = (start_dt + timedelta(days=7)).strftime('%Y%m%d')
+end_date = input(f"Enter end date (YYYYMMDD) [press Enter for {default_end}]: ").strip()
+if not end_date:
+    end_date = default_end
+
+# Validate dates
+datetime.strptime(start_date, '%Y%m%d')
+datetime.strptime(end_date, '%Y%m%d')
+
+# Files to process
+input_files = {
+    'all': 'data/nfl_odds_movements.csv',
+    'circa': 'data/nfl_odds_movements_circa.csv',
+    'dk': 'data/nfl_odds_movements_dk.csv'
+}
+
+# Process each file
+for name, file_path in input_files.items():
+    # Read and filter data
+    df = pd.read_csv(file_path)
+    df['date'] = df['file1'].str.extract(r'(\d{8})')
+    df = df[(df['date'] >= start_date) & (df['date'] <= end_date)]
+    df = df.drop('date', axis=1)
+    
+    # Save back to original file
+    df.to_csv(file_path, index=False)
+    print(f"Filtered {name} odds data saved to {file_path} ({len(df)} rows)")
+
+# Ask about cleaning up raw files
+cleanup = input("\nRemove raw odds files from data/odds/? (y/n): ").lower().strip()
+if cleanup == 'y':
+    # Get all JSON files in the odds directory
+    odds_files = glob.glob('data/odds/nfl_odds_vsin_*.json')
+    removed = 0
+    
+    for file in odds_files:
+        # Extract date from filename
+        file_date = file.split('_')[-2]  # Gets YYYYMMDD from filename
+        
+        # Remove if outside date range
+        if file_date < start_date or file_date > end_date:
+            os.remove(file)
+            removed += 1
+    
+    print(f"\nRemoved {removed} raw odds files outside the date range {start_date} to {end_date}") 
