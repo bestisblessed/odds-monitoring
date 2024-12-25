@@ -149,7 +149,8 @@ for name, file_path in input_files.items():
     print(f"Filtered {name} odds data saved to {file_path} ({len(df)} rows)")
 
 # Ask about cleaning up raw files
-cleanup = input("\nRemove raw odds files from data/odds/? (y/n): ").lower().strip()
+# cleanup = input("\nRemove raw odds files from data/odds/? (y/n): ").lower().strip()
+cleanup = input("\nRemove raw odds files from data/odds/? (y/n) [press Enter for n]: ").lower().strip()
 if cleanup == 'y':
     # Get all JSON files in the odds directory
     odds_files = glob.glob('data/odds/nfl_odds_vsin_*.json')
