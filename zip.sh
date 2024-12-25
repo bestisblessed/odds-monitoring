@@ -16,8 +16,8 @@ mkdir -p zips
 # echo "Backup created: zips/ufc_backup_${current_date}.zip"
 # echo "Backup created: zips/ncaaf_backup_${current_date}.zip"
 
-# SSH into Trinity and create the backups directly there
-ssh Trinity "cd /home/trinity/odds-monitoring && \
+# ssh Trinity "cd /home/trinity/odds-monitoring && \
+ssh Trinity-Public "cd /home/trinity/odds-monitoring && \
     mkdir -p zips && \
     zip -r zips/nfl_backup_${current_date}.zip NFL/Scraping/data/ && \
     zip -r zips/ufc_backup_${current_date}.zip UFC/Scraping/data/ && \
