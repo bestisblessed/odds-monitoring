@@ -196,13 +196,13 @@ ncaaf_odds_data['time_before'] = ncaaf_odds_data['time_before'].apply(lambda dt:
 ncaaf_odds_data['time_after'] = ncaaf_odds_data['time_after'].apply(lambda dt: dt.strftime('%b %d %-I:%M%p') if pd.notnull(dt) else None)
 # ncaaf_odds_data = ncaaf_odds_data.drop(columns=['odds_before', 'odds_after', 'file1', 'file2'])
 print(ncaaf_odds_data[['team_1', 'team_2', 'team1_odds_before', 'team2_odds_before', 'team1_odds_after', 'team2_odds_after']].head())
-ncaaf_odds_data = ncaaf_odds_data.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+ncaaf_odds_data = ncaaf_odds_data.map(lambda x: x.strip() if isinstance(x, str) else x)
 ncaaf_odds_data.to_csv(file_path, index=False)  
 ncaaf_odds_data = pd.read_csv('data/ncaaf_odds_movements.csv')
 circa_odds_data = ncaaf_odds_data[ncaaf_odds_data['sportsbook'] == 'Circa']
-circa_odds_data = circa_odds_data.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+circa_odds_data = circa_odds_data.map(lambda x: x.strip() if isinstance(x, str) else x)
 circa_odds_data.to_csv('data/ncaaf_odds_movements_circa.csv', index=False)
 ncaaf_odds_data = pd.read_csv('data/ncaaf_odds_movements.csv')
 dk_odds_data = ncaaf_odds_data[ncaaf_odds_data['sportsbook'] == 'DK']
-dk_odds_data = dk_odds_data.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+dk_odds_data = dk_odds_data.map(lambda x: x.strip() if isinstance(x, str) else x)
 dk_odds_data.to_csv('data/ncaaf_odds_movements_dk.csv', index=False)
