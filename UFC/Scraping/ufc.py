@@ -21,8 +21,14 @@ except subprocess.CalledProcessError:
 # Configure Chrome options
 chrome_options = Options()
 chrome_options.add_argument("--headless")
-chrome_options.add_argument("--no-sandbox")  # Required for running on Raspberry Pi
 chrome_options.add_argument("--disable-dev-shm-usage")  # Required for running on Raspberry Pi
+chrome_options.add_argument("--no-sandbox")
+chrome_options.add_argument("--user-data-dir=/tmp/chrome-temp")
+chrome_options.add_experimental_option("prefs", {
+    "profile.default_content_settings.popups": 0,
+    "download.default_directory": "/tmp",
+    "download.prompt_for_download": False
+})
 
 # Initialize the Chrome WebDriver with the options and service
 service = Service(chromedriver_path)
