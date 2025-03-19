@@ -192,12 +192,13 @@ for matchup in matchups:
         # Plot fighter 1 odds (worst if favorite, best if underdog)
         f1_label = f"{fighter1} - Odds"
         plt.plot(valid_timestamps, valid_f1_odds, linestyle='-', color='blue', marker='o',
-                 label=f1_label, markevery=[0, len(valid_timestamps) - 1])  # Mark at start and end
+                 label=f1_label, markevery=[0, -1])  # Mark first and last points
         
         # Plot fighter 2 odds (worst if favorite, best if underdog)
         f2_label = f"{fighter2} - Odds"
         plt.plot(valid_timestamps, valid_f2_odds, linestyle='-', color='red', marker='o',
-                 label=f2_label, markevery=[0, len(valid_timestamps) - 1])  # Mark at start and end
+                 label=f2_label, markevery=[0, -1])  # Mark first and last points
+        
         # Format the plot
         plt.title(f"Odds Movement for {matchup}", fontsize=16)
         plt.xlabel("Date/Time", fontsize=12)
@@ -207,14 +208,36 @@ for matchup in matchups:
         # Add a horizontal line at 0
         plt.axhline(y=0, color='black', linestyle='-', alpha=0.3)
         
-        # # Add text to indicate favorite/underdog
-        # plt.text(0.02, 0.98, "Negative odds = favorite", transform=plt.gca().transAxes, 
-        #          fontsize=10, verticalalignment='top')
-        # plt.text(0.02, 0.95, "Positive odds = underdog", transform=plt.gca().transAxes, 
-        #          fontsize=10, verticalalignment='top')
+        # Find min and max odds values
+        min_odds = min(min(valid_f1_odds), min(valid_f2_odds))
+        max_odds = max(max(valid_f1_odds), max(valid_f2_odds))
+        
+        # Set y-axis limits in increments of 100, expanding to fit all data
+        if min_odds < -100:
+            # Round down to nearest 100
+            y_min = -100 * ((-min_odds // 100) + 1)
+        else:
+            y_min = -100
+        
+        if max_odds > 100:
+            # Round up to nearest 100
+            y_max = 100 * ((max_odds // 100) + 1)
+        else:
+            y_max = 100
+        
+        # Make sure the axis is always centered around 0
+        if abs(y_min) > y_max:
+            y_max = abs(y_min)
+        elif y_max > abs(y_min):
+            y_min = -y_max
+        
+        plt.ylim(y_min, y_max)
+        
+        # Set y-ticks to be in increments of 100
+        plt.yticks(range(int(y_min), int(y_max) + 1, 100))
         
         # Format the x-axis to show dates nicely
-        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))  # Removed the time portion
+        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
         plt.gcf().autofmt_xdate()
         
         # Add legend with smaller font in the middle right
