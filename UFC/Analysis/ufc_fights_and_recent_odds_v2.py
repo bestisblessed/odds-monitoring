@@ -1,9 +1,19 @@
 import os
 import json
 import csv
+from datetime import datetime, timedelta
 
 folder_path = 'data/' 
-date_input = input("Enter the date in the format 'Sat,October 19th': ")
+
+# Calculate the next Saturday
+today = datetime.now()
+days_ahead = (5 - today.weekday() + 7) % 7
+next_saturday = today + timedelta(days=days_ahead)
+day = next_saturday.day
+suffix = 'th' if 11 <= day <= 13 else {1:'st', 2:'nd', 3:'rd'}.get(day % 10, 'th')
+default_date = next_saturday.strftime(f"%a,%B {day}{suffix}")
+
+date_input = input("Enter the date in the format 'Sat,October 19th': ") or default_date
 
 latest_fights = {}
 for file in sorted(os.listdir(folder_path), reverse=True):
