@@ -3,7 +3,7 @@
 current_date=$(date +%b_%d_%y | tr '[:lower:]' '[:upper:]')
 
 # rsync -av Trinity:/home/trinity/odds-monitoring/zips/ zips/
-rsync -av Trinity-Public:/home/trinity/odds-monitoring/zips/ zips/
+rsync -av Trinity:/home/trinity/odds-monitoring/zips/ zips/
 
 mkdir -p NFL/Scraping/data
 mkdir -p UFC/Scraping/data
