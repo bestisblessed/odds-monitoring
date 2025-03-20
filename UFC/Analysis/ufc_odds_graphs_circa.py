@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import re
 from matplotlib.backends.backend_pdf import PdfPages
 import datetime
-
+import os
 # Safe split function for odds columns
 def s(x):
     if pd.isna(x): return [None, None]
@@ -48,8 +48,11 @@ for c in ['b1','b2','a1','a2']:
 # Filter only 'Circa' sportsbook data
 d = d[d['sportsbook']=='Circa']
 
+output_dir = "ufc_odds_images"
+os.makedirs(output_dir, exist_ok=True)
+
 # Create PDF for graphs
-with PdfPages("UFC_ODDS_MOVEMENT_GRAPHS_CIRCA.pdf") as pdf:
+with PdfPages("ufc_odds_images/UFC_ODDS_MOVEMENT_GRAPHS_CIRCA.pdf") as pdf:
     for _, r in d[['f1','f2']].drop_duplicates().iterrows():
         f = d[(d['f1']==r['f1']) & (d['f2']==r['f2'])].sort_values('ts')
         if f.empty: continue
@@ -64,4 +67,22 @@ with PdfPages("UFC_ODDS_MOVEMENT_GRAPHS_CIRCA.pdf") as pdf:
         pdf.savefig()
         plt.close()
 
-print("Saved to UFC_ODDS_MOVEMENT_GRAPHS_CIRCA.pdf") 
+print("Saved to ufc_odds_images/UFC_ODDS_MOVEMENT_GRAPHS_CIRCA.pdf")
+
+# Save graphs as PNG for Xcode app
+for _, r in d[['f1','f2']].drop_duplicates().iterrows():
+    f = d[(d['f1']==r['f1']) & (d['f2']==r['f2'])].sort_values('ts')
+    if f.empty: continue
+    plt.figure(figsize=(10,5))
+    plt.plot(f['ts'], f['a1'], marker='s', linestyle='-', label=f"{r['f1']} After")
+    plt.plot(f['ts'], f['a2'], marker='s', linestyle='-', label=f"{r['f2']} After")
+    plt.xlabel("Date")
+    plt.ylabel("Odds")
+    plt.title(f"Odds Movement: {r['f1']} vs {r['f2']} (Circa)")
+    plt.legend()
+    plt.grid(True)
+    file_name = f"{output_dir}/{r['f1']}_vs_{r['f2']}.png".replace(" ", "_")
+    plt.savefig(file_name, format='png', dpi=300)
+    plt.close()
+
+print(f"Saved images to {output_dir}/")
