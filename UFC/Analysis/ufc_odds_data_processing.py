@@ -3,6 +3,8 @@ import re
 import json
 import csv  # Importing the csv module
 import shutil
+from datetime import datetime, timedelta
+
 shutil.copytree('../Scraping/data', 'data', dirs_exist_ok=True)
 
 # Delete empty files right at the beginning
@@ -109,3 +111,40 @@ with open(csv_file_path, mode='w', newline='') as csv_file:
         writer.writerow(movement)  # Write each movement
 
 print(f"Odds movements saved to {csv_file_path}")
+
+# Get the dates for our window
+current_date = datetime.now()
+one_week_ago = current_date - timedelta(weeks=1)
+eight_weeks_later = current_date + timedelta(weeks=8)
+
+# Read the CSV file and filter rows based on 'game_date'
+filtered_rows = []
+with open(csv_file_path, mode='r') as csv_file:
+    csv_reader = csv.DictReader(csv_file)
+    fieldnames = csv_reader.fieldnames
+    for row in csv_reader:
+        try:
+            # Parse the date string (e.g., 'Sat,December 14th')
+            date_str = row['game_date'].replace('th', '').replace('nd', '').replace('rd', '').replace('st', '')
+            row_date = datetime.strptime(date_str, '%a,%B %d')
+            
+            # Set year to current year, or next year if the date has already passed this year
+            row_date = row_date.replace(year=current_date.year)
+            if row_date < one_week_ago:
+                row_date = row_date.replace(year=current_date.year + 1)
+            
+            # Keep only if date is within our window (last week to 8 weeks ahead)
+            if one_week_ago <= row_date <= eight_weeks_later:
+                filtered_rows.append(row)
+        except ValueError as e:
+            print(f"Skipping row due to date parsing error: {row['game_date']}")
+            continue
+
+# Write the filtered rows back to the CSV file
+with open(csv_file_path, mode='w', newline='') as csv_file:
+    writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+    writer.writeheader()
+    for row in filtered_rows:
+        writer.writerow(row)
+
+print("Rows with dates from the past week to 8 weeks ahead have been saved back to ufc_odds_movements.csv")

@@ -1,5 +1,6 @@
 import os
 import json
+from datetime import datetime, timedelta
 
 # Function to extract fights for a given day
 def extract_fights_for_day(day, folder_path):
@@ -48,10 +49,18 @@ def display_fights(fights):
         print()
 
 # Path to the folder containing the files
-folder_path = 'data/'  # Change this to your actual folder path if different
+folder_path = 'data/'
+
+# Calculate the next Saturday
+today = datetime.now()
+days_ahead = (5 - today.weekday() + 7) % 7
+next_saturday = today + timedelta(days=days_ahead)
+day = next_saturday.day
+suffix = 'th' if 11 <= day <= 13 else {1:'st', 2:'nd', 3:'rd'}.get(day % 10, 'th')
+default_date = next_saturday.strftime(f"%a,%B {day}{suffix}")
 
 # Input the desired date
-date_input = input("Enter the date in the format 'Sat,October 19th': ")
+date_input = input("Enter the date in the format 'Sat,October 19th': ") or default_date
 
 # Extract, format, and display the fights for the given date
 fights = extract_fights_for_day(date_input, folder_path)
