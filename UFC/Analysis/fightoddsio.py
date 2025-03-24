@@ -46,7 +46,7 @@ def parse_odds_table(html_content):
             # Extract sportsbook name from href
             sportsbook = link['href'].split('/')[-1]
             headers.append(sportsbook)
-        else:
+        elif not headers:  # Only add Fighters if it's the first column
             headers.append('Fighters')
     
     # Parse rows
@@ -60,10 +60,9 @@ def parse_odds_table(html_content):
             row_data.append(fighter_link.text)
         
         # Get odds for each sportsbook
-        for td in tr.find_all('td')[1:]:  # Skip fighter name column
+        for td in tr.find_all('td')[1:-1]:  # Skip fighter name column and last empty column
             button = td.find('button')
             if button:
-                # Extract odds value from span
                 odds_span = button.find('span', {'class': re.compile('jss\\d+ false')})
                 if odds_span:
                     row_data.append(odds_span.text)
@@ -78,13 +77,20 @@ def parse_odds_table(html_content):
     df = pd.DataFrame(rows, columns=headers)
     return df
 
-def save_odds(html_file, output_csv):
+def save_odds(html_file, output_dir='./data'):
     with open(html_file, 'r') as f:
         html_content = f.read()
+    
+    # Create timestamp for filename
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M')
+    output_csv = f'{output_dir}/ufc_odds_fightoddsio_{timestamp}.csv'
+    
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
     
     df = parse_odds_table(html_content)
     df.to_csv(output_csv, index=False)
     print(f"Saved odds data to {output_csv}")
 
 if __name__ == "__main__":
-    save_odds('./data/odds_fightoddsio.html', './data/ufc_odds.csv')
+    save_odds('./data/odds_fightoddsio.html')
