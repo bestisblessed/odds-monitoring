@@ -5,101 +5,130 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from bs4 import BeautifulSoup
 import json
-import datetime
 import csv
 import os
 from datetime import datetime
 import subprocess
+import pandas as pd
+import re
 
-# Find chromedriver path using 'which'
-chromedriver_path = "/usr/bin/chromedriver"
+def setup_driver():
+    chromedriver_path = "/usr/bin/chromedriver"
+    # chromedriver_path = "/opt/homebrew/bin/chromedriver"
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--user-data-dir=/tmp/chrome-temp")
+    chrome_options.add_experimental_option("prefs", {
+        "profile.default_content_settings.popups": 0,
+        "download.default_directory": "/tmp",
+        "download.prompt_for_download": False
+    })
+    service = Service(chromedriver_path)
+    return webdriver.Chrome(service=service, options=chrome_options)
 
-# Configure Chrome options
-chrome_options = Options()
-chrome_options.add_argument("--headless")
-chrome_options.add_argument("--disable-dev-shm-usage")  # Required for running on Raspberry Pi
-chrome_options.add_argument("--no-sandbox")
-chrome_options.add_argument("--user-data-dir=/tmp/chrome-temp")
-chrome_options.add_experimental_option("prefs", {
-    "profile.default_content_settings.popups": 0,
-    "download.default_directory": "/tmp",
-    "download.prompt_for_download": False
-})
-
-# Initialize the Chrome WebDriver with the options and service
-service = Service(chromedriver_path)
-driver = webdriver.Chrome(service=service, options=chrome_options)
-
-# Navigate to the URL
-url = 'https://data.vsin.com/vegas-odds-linetracker/?sportid=ufc&linetype=moneyline'
-driver.get(url)
-
-try:
-    # Wait for the table to be present
-    table_xpath = '/html/body/div[6]/div[2]/div/div[3]/div/div/div/div[2]/b/div[2]/table'
-    table = WebDriverWait(driver, 20).until(
-        EC.presence_of_element_located((By.XPATH, table_xpath))
-    )
-
-    # Get all immediate child elements of the table (both thead and tbody)
-    table_children = table.find_elements(By.XPATH, './*')
-
-    # Initialize an empty list to hold all rows of data
+def scrape_vsin():
+    driver = setup_driver()
+    url = 'https://data.vsin.com/vegas-odds-linetracker/?sportid=ufc&linetype=moneyline'
+    driver.get(url)
     data = []
+    
+    try:
+        table_xpath = '/html/body/div[6]/div[2]/div/div[3]/div/div/div/div[2]/b/div[2]/table'
+        table = WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.XPATH, table_xpath))
+        )
+        table_children = table.find_elements(By.XPATH, './*')
+        column_names = []
 
-    # Initialize current column names as empty
-    column_names = []
-
-    # Iterate over each child element of the table
-    for child in table_children:
-        if child.tag_name.lower() == 'thead':
-            # Extract column names from the header row
-            header_cells = child.find_elements(By.XPATH, './tr/th')
-            column_names = [cell.text.strip() for cell in header_cells]
-            # Handle empty header names
-            column_names = [name if name else f"Column{index+1}" for index, name in enumerate(column_names)]
-        elif child.tag_name.lower() == 'tbody':
-            # Use the current column names to extract data
-            rows = child.find_elements(By.TAG_NAME, "tr")
-            for row in rows:
-                cells = row.find_elements(By.TAG_NAME, "td")
-                cell_data = [cell.text.strip() for cell in cells]
-                # Only add row if there is data
-                if cell_data:
-                    # Match the number of columns in data with column names
-                    if len(cell_data) != len(column_names):
-                        # Adjust cell_data or column_names if necessary
+        for child in table_children:
+            if child.tag_name.lower() == 'thead':
+                header_cells = child.find_elements(By.XPATH, './tr/th')
+                column_names = [cell.text.strip() if cell.text.strip() else f"Column{index+1}" 
+                              for index, cell in enumerate(header_cells)]
+            elif child.tag_name.lower() == 'tbody':
+                rows = child.find_elements(By.TAG_NAME, "tr")
+                for row in rows:
+                    cells = row.find_elements(By.TAG_NAME, "td")
+                    cell_data = [cell.text.strip() for cell in cells]
+                    if cell_data:
                         max_length = max(len(cell_data), len(column_names))
                         cell_data.extend([None] * (max_length - len(cell_data)))
                         column_names.extend([f"ExtraColumn{index+1}" for index in range(len(column_names), max_length)])
-                    # Create a dictionary using column names as keys
-                    row_data = {column_names[index]: value for index, value in enumerate(cell_data)}
-                    data.append(row_data)
-        else:
-            # Other types of elements, skip or handle if needed
-            pass
+                        row_data = {column_names[index]: value for index, value in enumerate(cell_data)}
+                        data.append(row_data)
+    finally:
+        driver.quit()
+    
+    return data
 
-except Exception as e:
-    print(f"An error occurred: {e}")
-finally:
-    # Close the WebDriver
+def parse_odds_table(html_content):
+    soup = BeautifulSoup(html_content, 'html.parser')
+    table = soup.find('table', {'class': 'MuiTable-root'})
+    
+    headers = []
+    for th in table.find('thead').find_all('th'):
+        link = th.find('a')
+        if link:
+            sportsbook = link['href'].split('/')[-1]
+            headers.append(sportsbook)
+        elif not headers:
+            headers.append('Fighters')
+    
+    rows = []
+    for tr in table.find('tbody').find_all('tr'):
+        row_data = []
+        fighter_link = tr.find('a')
+        if fighter_link:
+            row_data.append(fighter_link.text)
+        
+        for td in tr.find_all('td')[1:-1]:
+            button = td.find('button')
+            if button:
+                odds_span = button.find('span', {'class': re.compile('jss\\d+ false')})
+                if odds_span:
+                    row_data.append(odds_span.text)
+                else:
+                    row_data.append('')
+            else:
+                row_data.append('')
+        rows.append(row_data)
+    
+    return pd.DataFrame(rows, columns=headers)
+
+def scrape_fightodds():
+    driver = setup_driver()
+    driver.get("https://fightodds.io/")
+    driver.implicitly_wait(5)
+    
+    html_content = driver.page_source
     driver.quit()
+    
+    return parse_odds_table(html_content)
 
-# Assuming current_time is already defined
-timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+def save_data(script_dir):
+    # Create timestamp and ensure data directory exists
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    data_dir = os.path.join(script_dir, 'data')
+    os.makedirs(data_dir, exist_ok=True)
+    
+    # Save VSIN data
+    vsin_data = scrape_vsin()
+    vsin_file = os.path.join(data_dir, f'ufc_odds_vsin_{timestamp}.json')
+    with open(vsin_file, 'w', encoding='utf-8') as f:
+        json.dump(vsin_data, f, ensure_ascii=False, indent=4)
+    print(f"VSIN data saved to {vsin_file}")
+    
+    # Save FightOdds data
+    fightodds_data = scrape_fightodds()
+    fightodds_file = os.path.join(data_dir, f'ufc_odds_fightoddsio_{timestamp}.csv')
+    fightodds_data.to_csv(fightodds_file, index=False)
+    print(f"FightOdds data saved to {fightodds_file}")
 
-# Get the script's directory
-script_dir = os.path.dirname(os.path.abspath(__file__))
+if __name__ == "__main__":
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    save_data(script_dir)
 
-# Create the full path using the script's directory
-filename = os.path.join(script_dir, 'data', f'ufc_odds_vsin_{timestamp}.json')
-
-# Create the 'data' directory if it doesn't exist
-os.makedirs(os.path.dirname(filename), exist_ok=True)
-
-# Write the data to the JSON file
-with open(filename, 'w', encoding='utf-8') as json_file:
-    json.dump(data, json_file, ensure_ascii=False, indent=4)
-
-print(f"Data has been saved to {filename}")
