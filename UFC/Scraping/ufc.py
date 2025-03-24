@@ -13,10 +13,7 @@ from datetime import datetime
 import subprocess
 
 # Find chromedriver path using 'which'
-try:
-    chromedriver_path = subprocess.check_output(['which', 'chromedriver']).strip().decode('utf-8')
-except subprocess.CalledProcessError:
-    raise RuntimeError("ChromeDriver not found. Please ensure it is installed and in your PATH.")
+chromedriver_path = "/usr/bin/chromedriver"
 
 # Configure Chrome options
 chrome_options = Options()
