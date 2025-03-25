@@ -1,6 +1,14 @@
 import os
 import re
 import csv
+import shutil
+shutil.copytree('../Scraping/data', 'data', dirs_exist_ok=True)
+files = os.listdir('data')
+# for file in files:
+#     file_path = os.path.join('data', file)
+#     if os.path.isfile(file_path) and os.stat(file_path).st_size == 0:
+#         print(f"Deleting empty file: {file}")
+#         os.remove(file_path)
 
 def load_files(directory):
     files = [f for f in os.listdir(directory) if re.match(r'ufc_odds_fightoddsio_\d{8}_\d{4}\.csv', f)]
