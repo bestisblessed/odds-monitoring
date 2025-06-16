@@ -20,7 +20,14 @@ def detect_odds_movement(odds_before, odds_after):
     for fighter_before, fighter_after in zip(odds_before, odds_after):
         if fighter_before['Fighters'] == fighter_after['Fighters']:
             for sportsbook in fighter_before:
-                if sportsbook != 'Fighters' and fighter_before[sportsbook] != fighter_after[sportsbook]:
+                # Skip the 'Fighters' column and 'Event' column if present
+                if sportsbook in ['Fighters', 'Event']:
+                    continue
+                    
+                # Check if the sportsbook exists in both datasets and has different values
+                if (sportsbook in fighter_after and 
+                    fighter_before[sportsbook] and fighter_after[sportsbook] and  # Ensure values are not empty
+                    fighter_before[sportsbook] != fighter_after[sportsbook]):
                     movements.append({
                         'fighter': fighter_before['Fighters'],
                         'sportsbook': sportsbook,
