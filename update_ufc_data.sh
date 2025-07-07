@@ -18,8 +18,9 @@ echo "Restored: UFC/Scraping/data/"
 ### PROCESS ODDS DATA AND COPY TO STREAMLIT $ SWIFT APP
 cd ~/Code/odds-monitoring/UFC/Analysis
 python ufc_odds_data_processing_fightoddsio.py
-cp /Users/td/Code/odds-monitoring/UFC/Analysis/data/ufc_odds_movements_fightoddsio.csv ~/Code/mma-ai/Streamlit/data/
 cp /Users/td/Code/odds-monitoring/UFC/Analysis/data/ufc_odds_movements_fightoddsio.csv ~/Code/mma-ai-swift-app/data/
+echo "Copying to swift app server.."
+scp /Users/td/Code/odds-monitoring/UFC/Analysis/data/ufc_odds_movements_fightoddsio.csv Trinity:/home/trinity/mma-ai-swift-app/data/
 #git add data/ufc_odds_movements_fightoddsio.csv -f
 #git commit -m "update odds data"
 #git push
