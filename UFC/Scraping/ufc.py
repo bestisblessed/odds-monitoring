@@ -61,6 +61,9 @@ def scrape_vsin():
                         column_names.extend([f"ExtraColumn{index+1}" for index in range(len(column_names), max_length)])
                         row_data = {column_names[index]: value for index, value in enumerate(cell_data)}
                         data.append(row_data)
+    except Exception as e:
+        # Catch any exception (e.g., TimeoutException) so the script can continue
+        print(f"VSIN scrape error: {e}. Continuing without VSIN data.")
     finally:
         driver.quit()
     
@@ -251,4 +254,5 @@ def save_data(script_dir):
 if __name__ == "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))
     save_data(script_dir)
+
 
