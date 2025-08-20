@@ -17,7 +17,7 @@ import re
 import time
 
 # --- Datadog setup: no API key needed, agent is local ---
-initialize(statsd_host="localhost", statsd_port=8125)
+#initialize(statsd_host="localhost", statsd_port=8125)
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 vsin_failed = False
@@ -192,18 +192,22 @@ try:
         fightodds_file = os.path.join(script_dir, 'data', f'ufc_odds_fightoddsio_{datetime.now().strftime("%Y%m%d_%H%M")}.csv')
         os.makedirs(os.path.dirname(fightodds_file), exist_ok=True)
         fightodds_data.to_csv(fightodds_file, index=False)
+    # Metrics
+#    if vsin_succeeded or fightodds_succeeded:
+#        statsd.gauge("ufc_odds_monitor.success", 1)
+#    else:
+#        statsd.gauge("ufc_odds_monitor.failure", 1)
+#except Exception:
+#    statsd.gauge("ufc_odds_monitor.failure", 1)
+#    raise
         fightodds_succeeded = True
         print("FightOdds data scraped and saved.")
     except Exception:
         print("FightOdds scrape failed")
-    # Metrics
-    if vsin_succeeded or fightodds_succeeded:
-        statsd.gauge("ufc_odds_monitor.success", 1)
-    else:
-        statsd.gauge("ufc_odds_monitor.failure", 1)
 except Exception:
-    statsd.gauge("ufc_odds_monitor.failure", 1)
-    raise
+    print("Script execution failed")
 
 print("UFC cron script finished")
 
+os.system("rm -rf /tmp/chrome-temp")
+print("Cleaned up temporary Chrome directory")
