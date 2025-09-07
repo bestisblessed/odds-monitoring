@@ -32,54 +32,93 @@ if response.status_code == 200:
     html = response.text
     soup = BeautifulSoup(html, 'html.parser')
     
+    # -----------------------------
+    # Extract kickoff times from embedded JSON
+    # We match urlPath and startTime pairs, allowing either order.
+    # -----------------------------
+    pair_pat = re.compile(
+        r'"urlPath"\s*:\s*"(/us/football/nfl/[^"/]+-at-[^"/]+)".*?"startTime"\s*:\s*"([^"]+)"'
+        r'|'
+        r'"startTime"\s*:\s*"([^"]+)".*?"urlPath"\s*:\s*"(/us/football/nfl/[^"/]+-at-[^"/]+)"',
+        re.S,
+    )
+    kickoff_by_path = {}
+    for m in pair_pat.finditer(html):
+        # path/time regardless of which side matched
+        path = m.group(1) or m.group(4)
+        tiso = m.group(2) or m.group(3)
+        if path and path not in kickoff_by_path:
+            kickoff_by_path[path] = tiso  # ISO8601, typically in Z (UTC)
+    
     # Try multiple approaches to find game URLs
     game_urls = []
+    seen = set()
     
     # Method 1: Look for href attributes with game patterns
     team_links = soup.find_all('a', href=re.compile(r'/us/football/nfl/.*-at-.*'))
     
     for link in team_links:
         href = link.get('href')
-        if href and '/us/football/nfl/' in href and '-at-' in href:
+        if not href:
+            continue
+        if '/us/football/nfl/' in href and '-at-' in href:
             # Skip futures/season pages
             if any(word in href for word in ['super-bowl', 'afc/', 'nfc/', 'winner', 'seed']):
                 continue
-            
-            # Make sure it's a full URL
             if href.startswith('/'):
                 href = 'https://www.oddschecker.com' + href
-            
-            if href not in game_urls:
+            if href not in seen:
+                seen.add(href)
                 game_urls.append(href)
     
-    # Method 2: Regex pattern on HTML content
-    pattern = re.compile(r'"urlPath":"(/us/football/nfl/[^"/]+-at-[^"/]+)"')
-    paths = pattern.findall(html)
-    
-    for p in paths:
+    # Method 2: Regex pattern on HTML content for urlPath
+    for p in re.findall(r'"urlPath":"(/us/football/nfl/[^"/]+-at-[^"/]+)"', html):
         full_url = "https://www.oddschecker.com" + p
-        if full_url not in game_urls:
+        if full_url not in seen:
+            seen.add(full_url)
             game_urls.append(full_url)
     
-    # Method 3: Look for JSON data or script tags
+    # Method 3: Look for URLs inside inline scripts
     scripts = soup.find_all('script')
     for script in scripts:
         if script.string:
-            # Look for game URLs in script content
-            script_urls = re.findall(r'/us/football/nfl/[^"\']+?-at-[^"\']+', script.string)
-            for url in script_urls:
-                if not any(word in url for word in ['super-bowl', 'afc/', 'nfc/', 'winner', 'seed']):
-                    full_url = "https://www.oddschecker.com" + url
-                    if full_url not in game_urls:
-                        game_urls.append(full_url)
+            for url in re.findall(r'/us/football/nfl/[^"\']+?-at-[^"\']+', script.string):
+                if any(word in url for word in ['super-bowl', 'afc/', 'nfc/', 'winner', 'seed']):
+                    continue
+                full_url = "https://www.oddschecker.com" + url if url.startswith('/') else url
+                if full_url not in seen:
+                    seen.add(full_url)
+                    game_urls.append(full_url)
 
+    # Build rows + add kickoff columns (EST only)
+    rows = []
+    for full_url in game_urls[:16]:
+        # derive path to look up kickoff
+        path = full_url.replace("https://www.oddschecker.com", '') if full_url.startswith("https://www.oddschecker.com") else full_url
+        tiso = kickoff_by_path.get(path)
+        
+        # Convert UTC to EST directly
+        kickoff_est = ''
+        if tiso:
+            try:
+                dt = pd.to_datetime(tiso, utc=True)
+                kickoff_est = dt.tz_convert('America/New_York').strftime('%Y-%m-%d %H:%M:%S %Z')
+            except:
+                kickoff_est = ''
+        
+        rows.append({
+            'Game URL': full_url,
+            'Kickoff EST': kickoff_est
+        })
+
+    df = pd.DataFrame(rows)
     out = "data/props/oddschecker_game_urls.csv"
-    pd.DataFrame({"Game URL": game_urls[:16]}).to_csv(out, index=False)
+    df.to_csv(out, index=False)
 
-    print(f"Found {len(game_urls)} unique base game URLs; saved first 16 to {out}")
-    if game_urls:
-        print(*game_urls[:16], sep="\n")
-    else:
+    print(f"Found {len(game_urls)} unique base game URLs; saved first 16 with dates to {out}")
+    print(df.to_string(index=False))
+
+    if not game_urls:
         print("No game URLs found. The page structure may have changed.")
         # Debug: save HTML content for inspection
         with open("debug_oddschecker.html", "w") as f:
