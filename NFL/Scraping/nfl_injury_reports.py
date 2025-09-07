@@ -10,16 +10,17 @@ import pandas as pd
 from datetime import datetime
 import os
 try:
-    chromedriver_path = subprocess.check_output(['which', 'chromedriver']).strip().decode('utf-8')
-except subprocess.CalledProcessError:
-    raise RuntimeError("ChromeDriver not found. Please ensure it is installed and in your PATH.")
+    chromedriver_path = "/usr/bin/chromedriver"  # Use same path as UFC script
+except:
+    try:
+        chromedriver_path = subprocess.check_output(['which', 'chromedriver']).strip().decode('utf-8')
+    except subprocess.CalledProcessError:
+        raise RuntimeError("ChromeDriver not found. Please ensure it is installed and in your PATH.")
 chrome_options = Options()
 chrome_options.add_argument("--headless")
 chrome_options.add_argument("--disable-dev-shm-usage")
 chrome_options.add_argument("--no-sandbox")
-chrome_options.add_argument("--disable-gpu")  # Helpful for headless on Raspberry Pi
-chrome_options.add_argument("--remote-debugging-port=9222")  # Help with DevTools connection
-chrome_options.add_argument("--user-data-dir=/tmp/chrome-temp")
+chrome_options.add_argument(f"--user-data-dir=/tmp/chrome-temp-injury-{datetime.now().strftime('%Y%m%d_%H%M%S')}")
 chrome_options.add_experimental_option("prefs", {
     "profile.default_content_settings.popups": 0,
     "download.default_directory": "/tmp",
@@ -54,3 +55,5 @@ try:
 
 finally:
     driver.quit()
+    # Clean up temporary Chrome directory
+    os.system("rm -rf /tmp/chrome-temp-injury-*")
