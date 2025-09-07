@@ -1,0 +1,4 @@
+1. Execute nfl.py for NFL odds
+2. Execute nfl_injury_reports.py daily for injury reports
+3. Execute nfl_props_scraper.py for player props from Bovada, BetOnline, MyBookie, Hard Rock
+4. Execute run_oddschecker_scraper.sh to scrape player props from Oddschecker

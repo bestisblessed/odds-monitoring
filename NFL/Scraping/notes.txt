@@ -1,0 +1,71 @@
+HTTP HEADERS EXPLAINED - BEGINNER'S GUIDE
+==========================================
+
+Think of HTTP headers like an ID card you show when entering a building. 
+Each header tells the website something about who you are and what you want.
+
+ESSENTIAL IDENTITY HEADERS:
+---------------------------
+
+1. User-Agent
+   - Tells the website what browser and device you're using (proves you're a real browser, not a bot)
+
+2. Accept
+   - Lists what file types your browser can handle (HTML, images, etc.)
+
+3. Accept-Language
+   - Tells website what languages you prefer (English, Spanish, etc.)
+
+4. Accept-Encoding
+   - Says you can handle compressed/zipped content to make pages load faster
+
+SECURITY & CONNECTION HEADERS:
+------------------------------
+
+5. DNT (Do Not Track)
+   - Asks websites not to track your behavior (shows privacy-conscious user behavior)
+
+6. Connection
+   - Reuses the same connection for multiple page requests (more efficient, like real browsers)
+
+7. Upgrade-Insecure-Requests
+   - Asks server to use HTTPS instead of HTTP when possible (shows security-conscious behavior)
+
+MODERN SECURITY HEADERS (Sec-Fetch-*):
+--------------------------------------
+These are newer Chrome security headers that prove you're a legitimate browser:
+
+8. Sec-Fetch-Dest
+   - Says what type of content you're requesting (document, image, script, etc.)
+
+9. Sec-Fetch-Mode
+   - Describes how you're making the request (navigate, cors, no-cors, etc.)
+
+10. Sec-Fetch-Site
+    - Says where the request came from (same-origin, cross-site, none, etc.)
+
+11. Sec-Fetch-User
+    - Proves a real person initiated the request (THE BIG ANTI-BOT SIGNAL!)
+
+PERFORMANCE HEADERS:
+-------------------
+
+12. Cache-Control
+    - Requests the newest version of the page (don't use cached/old content)
+
+WHY ODDSCHECKER NEEDS ALL OF THEM:
+---------------------------------
+
+Based on our test results:
+- Without Sec-Fetch headers → 403 Blocked (looks like a bot)
+- Without User-Agent → 403 Blocked (no browser identity)
+- Without Accept headers → 403 Blocked (doesn't look like real browser request)
+- With ALL headers → 200 Success ✅
+
+KEY INSIGHT:
+-----------
+OddsChecker's bot detection looks for COMPLETE browser fingerprints. 
+Missing even one expected header makes you look suspicious. 
+It's like trying to enter a high-security building - you need ALL the right credentials.
+
+MOST CRITICAL: Sec-Fetch-User: ?1 - This literally says "a human clicked this"!

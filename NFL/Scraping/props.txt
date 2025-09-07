@@ -1,0 +1,51 @@
+Based on the `nfl_props_scraper.py` script, here's what it scrapes and from where:
+
+What it scrapes: 
+NFL betting props (proposition bets) for a specific game.
+
+Where it scrapes from:
+The script scrapes from 4 major sportsbooks:
+
+1. Bovada (`bovada.lv`)
+   - Tabs scraped:
+     - Alternate Lines
+     - TD Scorer Props  
+     - Passing Props
+     - Receiving Props
+     - Rushing Props
+     - D/ST Props (Defense/Special Teams)
+     - Touchdown Props
+     - Special Bets
+     - Score Props
+     - Game Props
+   - Data extracted: Player names, teams, prop types, betting lines, over/under odds.
+
+2. MyBookie (`mybookie.ag`) 
+   - Data extracted: Prop descriptions, point values, odds, prop types.
+
+3. Hard Rock Bet (`app.hardrock.bet`)
+   - Tabs scraped:
+     - Game Lines
+     - Player Props  
+     - Halves
+     - Quarters
+   - Data extracted: Market headers, selection names, odds.
+
+4. BetOnline (`sports.betonline.ag`)
+   - Data extracted: Team names, prop sections, prop types, values.
+
+How it works:
+1. Uses Selenium WebDriver with Chrome (headless mode).
+2. Uses hardcoded game IDs for each sportsbook (currently set to a specific Cardinals vs Seahawks game).
+3. Navigates through different tabs/sections on each site.
+4. Extracts betting prop data using BeautifulSoup HTML parsing.
+5. Saves data as CSV files with timestamps in `data/props/` directory.
+
+Output:
+Creates separate CSV files for each sportsbook/tab combination, like:
+- `bovada_passing_props_20240101_123456.csv`
+- `mybookieag_nfl_props_20240101_123456.csv` 
+- `hard_rock_nfl_props_20240101_123456.csv`
+- `betonline_nfl_props_20240101_123456.csv`
+
+The script is designed for comparative odds analysis across multiple sportsbooks for the same NFL game.
