@@ -23,6 +23,7 @@ cp /Users/td/Code/odds-monitoring/UFC/Analysis/data/ufc_odds_movements_fightodds
 # cp /Users/td/Code/odds-monitoring/UFC/Analysis/data/ufc_odds_movements.csv ~/Code/mma-ai/Streamlit/data
 
 echo "Copying to swift app server.."
+cp /Users/td/Code/odds-monitoring/UFC/Analysis/data/ufc_odds_movements_fightoddsio.csv /Users/td/Code/mma-ai-swift-app/data
 scp /Users/td/Code/odds-monitoring/UFC/Analysis/data/ufc_odds_movements_fightoddsio.csv Trinity:/home/trinity/mma-ai-swift-app/data/
 
 #git add data/ufc_odds_movements_fightoddsio.csv -f
