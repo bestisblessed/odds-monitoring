@@ -17,3 +17,7 @@ echo "Restored: NFL/Scraping/data/"
 
 # DELETE REMOTE NFL ODDS DATA FILES
 #ssh Trinity "rm -rf /home/trinity/odds-monitoring/NFL/Scraping/data/* && echo 'Cleared NFL data files on Trinity'" 
+
+cd /Users/td/Code/odds-monitoring/NFL/Analysis 
+python nfl_odds_data_processing.py
+python nfl_odds_data_analysis.py

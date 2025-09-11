@@ -23,13 +23,24 @@ def format_odds(odds):
 def detect_odds_movement(odds_before, odds_after):
     movements = []
     for game_before, game_after in zip(odds_before, odds_after):
-        if game_before['Time'] == game_after['Time']:
-            game_date_column_name = list(game_before.keys())[1]  
+        # Minimal guard around 'Time' to avoid KeyError
+        time_before = game_before.get('Time')
+        if time_before is None:
+            time_before = next((game_before[k] for k in game_before if isinstance(k, str) and k.strip().lower() == 'time'), None)
+        time_after = game_after.get('Time')
+        if time_after is None:
+            time_after = next((game_after[k] for k in game_after if isinstance(k, str) and k.strip().lower() == 'time'), None)
+
+        if time_before is None or time_after is None:
+            continue
+
+        if time_before == time_after:
+            game_date_column_name = list(game_before.keys())[1]
             for key in game_before:
                 if key not in ["Time", game_date_column_name] and key in game_after:
                     if game_before[key] != game_after[key]:
                         movements.append({
-                            'game_time': game_before['Time'],  
+                            'game_time': time_before,
                             'game_date_column_name': game_date_column_name,
                             'game_date_value': game_before[game_date_column_name],
                             'sportsbook': key,
