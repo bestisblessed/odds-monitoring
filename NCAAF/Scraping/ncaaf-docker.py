@@ -124,7 +124,7 @@ for odds_type, url in urls.items():
             cells = row.find_elements(By.TAG_NAME, "td")
             cell_data = [cell.text.strip() for cell in cells]
             
-            print(f"Row {i}: {len(cell_data)} columns, data: {cell_data[:3]}...")  # Debug first 3 columns
+            # print(f"Row {i}: {len(cell_data)} columns, data: {cell_data[:3]}...")  # Debug first 3 columns
             
             if cell_data and len(cell_data) >= 3:  # Lower the minimum column requirement for debugging
                 # Extract team names from the second cell (index 1)

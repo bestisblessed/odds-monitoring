@@ -12,3 +12,7 @@ docker run --rm -v /home/trinity/odds-monitoring/NCAAF/Scraping/data:/app/data n
 echo ""
 echo "✅ Container started successfully!"
 echo "🎉 NCAAF Scraper just ran!"
+
+# Convert JSON files to CSV format
+echo "📊 Converting JSON files to CSV format..."
+python json_to_csv.py
