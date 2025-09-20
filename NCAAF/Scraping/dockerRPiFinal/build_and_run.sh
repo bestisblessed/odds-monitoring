@@ -13,4 +13,4 @@ echo "🎉 NCAAF Scraper just ran!"
 
 # Convert JSON files to CSV format
 echo "📊 Converting JSON files to CSV format..."
-python /home/trinity/odds-monitoring/NCAAF/Scraping/json_to_csv.py
+/home/trinity/.pyenv/shims/python /home/trinity/odds-monitoring/NCAAF/Scraping/json_to_csv.py
