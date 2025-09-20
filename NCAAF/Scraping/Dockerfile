@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
     unzip \
+    tzdata \
     libnss3 \
     libnspr4 \
     libatk-bridge2.0-0 \
@@ -19,9 +20,18 @@ RUN apt-get update && apt-get install -y \
     libatspi2.0-0 \
     libgtk-3-0 \
     libgdk-pixbuf-xlib-2.0-0 \
+    libxss1 \
+    libxtst6 \
+    libpangocairo-1.0-0 \
+    libatk1.0-0 \
+    libcairo-gobject2 \
     chromium \
     chromium-driver \
     && rm -rf /var/lib/apt/lists/*
+
+# Set timezone to Eastern Time
+ENV TZ=America/New_York
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # Set working directory
 WORKDIR /app

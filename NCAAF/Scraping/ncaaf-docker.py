@@ -31,6 +31,9 @@ chrome_options.add_argument("--disable-extensions")
 chrome_options.add_argument("--disable-background-timer-throttling")
 chrome_options.add_argument("--disable-backgrounding-occluded-windows")
 chrome_options.add_argument("--disable-renderer-backgrounding")
+# chrome_options.add_argument("--disable-web-security")
+# chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+# chrome_options.add_argument("--remote-debugging-port=9222")
 chrome_options.add_argument("--user-data-dir=/tmp/chrome-temp")
 chrome_options.add_experimental_option("prefs", {
     "profile.default_content_settings.popups": 0,
@@ -56,13 +59,63 @@ for odds_type, url in urls.items():
     try:
         driver.get(url)
         
-        table_xpath = '/html/body/div[6]/div[2]/div/div[3]/div/div/div/div[2]/b/div[2]/table'
-        table = WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.XPATH, table_xpath))
+        # Wait for page to load completely
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.TAG_NAME, "body"))
         )
+        
+        # Additional wait for dynamic content to load, especially for totals page
+        if odds_type == 'totals':
+            print("Waiting extra time for totals page to load...")
+            import time
+            time.sleep(3)  # Initial wait
+            
+            # Try to refresh the page if it seems to be loading slowly
+            try:
+                # Check if we have any meaningful data in the first few rows
+                test_rows = driver.find_elements(By.TAG_NAME, "tr")[:5]
+                has_data = any(cell.text.strip() for row in test_rows for cell in row.find_elements(By.TAG_NAME, "td"))
+                
+                if not has_data:
+                    print("Totals page seems empty, refreshing...")
+                    driver.refresh()
+                    time.sleep(5)  # Wait after refresh
+            except:
+                pass
+        
+        # Try multiple selectors to find the table
+        table_selectors = [
+            '/html/body/div[6]/div[2]/div/div[3]/div/div/div/div[2]/b/div[2]/table',
+            '//table[contains(@class, "odds")]',
+            '//table[contains(@class, "line")]',
+            '//table[contains(@class, "betting")]',
+            '//table'
+        ]
+        
+        table = None
+        for selector in table_selectors:
+            try:
+                table = WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((By.XPATH, selector))
+                )
+                print(f"Found table with selector: {selector}")
+                
+                # Wait for table to have actual data rows (not just empty cells)
+                if odds_type == 'totals':
+                    print("Waiting for totals table to populate with data...")
+                    import time
+                    time.sleep(2)  # Simple wait for data to load
+                
+                break
+            except:
+                continue
+        
+        if not table:
+            raise Exception("Could not find any table on the page")
 
         # Get all rows from the table
         all_rows = table.find_elements(By.TAG_NAME, "tr")
+        print(f"Found {len(all_rows)} total rows in table")
         data = []
         
         # Process data rows (skip header row)
@@ -71,7 +124,9 @@ for odds_type, url in urls.items():
             cells = row.find_elements(By.TAG_NAME, "td")
             cell_data = [cell.text.strip() for cell in cells]
             
-            if cell_data and len(cell_data) >= 12:  # Ensure we have the expected 12 columns
+            print(f"Row {i}: {len(cell_data)} columns, data: {cell_data[:3]}...")  # Debug first 3 columns
+            
+            if cell_data and len(cell_data) >= 3:  # Lower the minimum column requirement for debugging
                 # Extract team names from the second cell (index 1)
                 team_cell = cell_data[1] if len(cell_data) > 1 else ""
                 teams = []
@@ -79,11 +134,11 @@ for odds_type, url in urls.items():
                     team_lines = team_cell.split('\n')
                     teams = [line.strip() for line in team_lines if line.strip() and re.search(r'[A-Z][a-z]', line.strip())]
                 
-                # Extract odds data from sportsbook columns (columns 2-11)
+                # Extract odds data from sportsbook columns (columns 2 onwards)
                 odds_data = {}
                 sportsbooks = ['DK Open', 'DK', 'Circa', 'South Point', 'GLD Nugget', 'Westgate', 'Wynn', 'Stations', 'Caesars', 'BetMGM']
                 
-                for j in range(2, min(12, len(cell_data))):
+                for j in range(2, len(cell_data)):
                     if cell_data[j]:
                         odds_text = cell_data[j]
                         # Look for patterns like "+10\n-112" or "-13.5\n-110"
