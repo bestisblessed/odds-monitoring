@@ -1,0 +1,33 @@
+services:
+  ncaaf-scraper-rpi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ncaaf-scraper-rpi
+    restart: "no"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - HTTP_PROXY=http://proxy-rotator:8080
+      - HTTPS_PROXY=http://proxy-rotator:8080
+    depends_on:
+      - proxy-rotator
+    networks:
+      - scraping-network
+
+  proxy-rotator:
+    image: clarketm/proxy-rotator:latest
+    container_name: proxy-rotator
+    ports:
+      - "8080:8080"
+    environment:
+      - PROXY_LIST_URL=https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt
+      - ROTATION_INTERVAL=300  # Rotate every 5 minutes
+    restart: unless-stopped
+    networks:
+      - scraping-network
+
+networks:
+  scraping-network:
+    driver: bridge
