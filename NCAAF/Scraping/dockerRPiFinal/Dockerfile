@@ -1,8 +1,12 @@
 # Use ARM64 compatible Python image for Raspberry Pi
 FROM python:3.12-slim
 
-# Install system dependencies for ARM64/Raspberry Pi
-RUN apt-get update && apt-get install -y \
+# Set environment variables for non-interactive installation
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+# Install system dependencies for ARM64/Raspberry Pi (minimal set for headless browser)
+RUN apt-get update && apt-get install --no-install-recommends -y \
     wget \
     gnupg \
     unzip \
@@ -27,7 +31,8 @@ RUN apt-get update && apt-get install -y \
     libcairo-gobject2 \
     chromium \
     chromium-driver \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # Set timezone to Eastern Time
 ENV TZ=America/New_York
