@@ -11,6 +11,7 @@ import csv
 import os
 from datetime import datetime
 import subprocess
+import re
 
 # Try to find chromedriver, with fallback for Docker environment
 try:
@@ -60,29 +61,48 @@ for odds_type, url in urls.items():
             EC.presence_of_element_located((By.XPATH, table_xpath))
         )
 
-        table_children = table.find_elements(By.XPATH, './*')
+        # Get all rows from the table
+        all_rows = table.find_elements(By.TAG_NAME, "tr")
         data = []
-        column_names = []
-
-        for child in table_children:
-            if child.tag_name.lower() == 'thead':
-                header_cells = child.find_elements(By.XPATH, './tr/th')
-                column_names = [cell.text.strip() for cell in header_cells]
-                column_names = [name if name else f"Column{index+1}" for index, name in enumerate(column_names)]
-            elif child.tag_name.lower() == 'tbody':
-                rows = child.find_elements(By.TAG_NAME, "tr")
-                for row in rows:
-                    cells = row.find_elements(By.TAG_NAME, "td")
-                    cell_data = [cell.text.strip() for cell in cells]
-                    if cell_data:
-                        if len(cell_data) != len(column_names):
-                            max_length = max(len(cell_data), len(column_names))
-                            cell_data.extend([None] * (max_length - len(cell_data)))
-                            column_names.extend([f"ExtraColumn{index+1}" for index in range(len(column_names), max_length)])
-                        row_data = {column_names[index]: value for index, value in enumerate(cell_data)}
-                        data.append(row_data)
-            else:
-                pass
+        
+        # Process data rows (skip header row)
+        for i in range(1, len(all_rows)):
+            row = all_rows[i]
+            cells = row.find_elements(By.TAG_NAME, "td")
+            cell_data = [cell.text.strip() for cell in cells]
+            
+            if cell_data and len(cell_data) >= 12:  # Ensure we have the expected 12 columns
+                # Extract team names from the second cell (index 1)
+                team_cell = cell_data[1] if len(cell_data) > 1 else ""
+                teams = []
+                if team_cell:
+                    team_lines = team_cell.split('\n')
+                    teams = [line.strip() for line in team_lines if line.strip() and re.search(r'[A-Z][a-z]', line.strip())]
+                
+                # Extract odds data from sportsbook columns (columns 2-11)
+                odds_data = {}
+                sportsbooks = ['DK Open', 'DK', 'Circa', 'South Point', 'GLD Nugget', 'Westgate', 'Wynn', 'Stations', 'Caesars', 'BetMGM']
+                
+                for j in range(2, min(12, len(cell_data))):
+                    if cell_data[j]:
+                        odds_text = cell_data[j]
+                        # Look for patterns like "+10\n-112" or "-13.5\n-110"
+                        odds_match = re.search(r'([+-]?\d+\.?\d*)\s*([+-]?\d+)', odds_text)
+                        if odds_match:
+                            sportsbook_name = sportsbooks[j-2] if j-2 < len(sportsbooks) else f"Sportsbook{j-2}"
+                            odds_data[sportsbook_name] = {
+                                'spread': odds_match.group(1),
+                                'odds': odds_match.group(2)
+                            }
+                
+                # Create structured data entry
+                if teams and odds_data:
+                    game_data = {
+                        'teams': teams,
+                        'odds': odds_data,
+                        'raw_data': cell_data  # Keep raw data for debugging
+                    }
+                    data.append(game_data)
 
         # Save data for this odds type
         filename = os.path.join(script_dir, 'data', f'ncaaf_odds_vsin_{odds_type}_{timestamp}.json')
