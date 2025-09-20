@@ -1,0 +1,10 @@
+services:
+  ncaaf-scraper:
+    build: .
+    container_name: ncaaf-scraper
+    restart: "no"
+    volumes:
+      # - ./data:/app/data
+      - ~/odds-monitoring/NCAAF/Scraping/data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
