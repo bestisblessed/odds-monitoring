@@ -1,0 +1,12 @@
+services:
+  ncaaf-scraper-macos:
+    build:
+      context: .
+      dockerfile: Dockerfile-macOS
+    container_name: ncaaf-scraper-macos
+    restart: "no"
+    volumes:
+      - ~/Code/odds-monitoring/NCAAF/Scraping/data:/app/data
+      # - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
