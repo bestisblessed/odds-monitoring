@@ -1,7 +1,5 @@
 #!/bin/bash
 
-cd ~/odds-monitoring/NCAAF/Scraping
-
 echo "Building NCAAF scraper container for Raspberry Pi..."
 docker build -t ncaaf-scraper-rpi .
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-cd /home/trinity/odds-monitoring/NCAAF/Scraping
+cd /home/trinity/odds-monitoring/NCAAF/Scraping/dockerRPiFinal
 
 # Run the scraper once
 docker run --rm -v /home/trinity/odds-monitoring/NCAAF/Scraping/data:/app/data ncaaf-scraper-rpi
