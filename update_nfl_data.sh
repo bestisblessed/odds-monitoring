@@ -21,3 +21,10 @@ echo "Restored: NFL/Scraping/data/"
 cd /Users/td/Code/odds-monitoring/NFL/Analysis 
 python nfl_odds_data_processing.py
 python nfl_odds_data_analysis.py
+
+### Copy odds data files to nfl-ai directory ###
+cp /Users/td/Code/odds-monitoring/NFL/Analysis/data/nfl_odds_movements.csv /Users/td/Code/nfl-ai/Websites/Streamlit/data/odds/
+cp /Users/td/Code/odds-monitoring/NFL/Analysis/data/nfl_odds_movements_circa.csv /Users/td/Code/nfl-ai/Websites/Streamlit/data/odds/
+cp /Users/td/Code/odds-monitoring/NFL/Analysis/data/nfl_odds_movements_dk.csv /Users/td/Code/nfl-ai/Websites/Streamlit/data/odds/
+cp /Users/td/Code/odds-monitoring/NFL/Analysis/data/nfl_odds_movements.pdf /Users/td/Code/nfl-ai/Websites/Streamlit/data/odds/
+echo "Copied NFL odds data files to nfl-ai directory"
