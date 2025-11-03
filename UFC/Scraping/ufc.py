@@ -24,9 +24,18 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 vsin_failed = False
 fightodds_failed = False
 
-atexit.register(lambda: os.system("pkill chromium"))
-
 print("UFC cron script started")
+
+
+def register_driver_cleanup(driver):
+    def _cleanup():
+        try:
+            driver.quit()
+        except Exception:
+            pass
+
+    atexit.register(_cleanup)
+
 
 def setup_driver():
     chromedriver_path = "/usr/bin/chromedriver"
@@ -41,7 +50,9 @@ def setup_driver():
         "download.prompt_for_download": False
     })
     service = Service(chromedriver_path)
-    return webdriver.Chrome(service=service, options=chrome_options)
+    driver = webdriver.Chrome(service=service, options=chrome_options)
+    register_driver_cleanup(driver)
+    return driver
 
 def scrape_vsin():
     driver = setup_driver()

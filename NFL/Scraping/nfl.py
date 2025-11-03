@@ -11,7 +11,7 @@ import csv
 import os
 import atexit
 from datetime import datetime
-import subprocess  
+import subprocess
 try:
     chromedriver_path = "/usr/bin/chromedriver"  # Use same path as UFC script
 except:
@@ -29,10 +29,19 @@ chrome_options.add_experimental_option("prefs", {
     "download.default_directory": "/tmp",
     "download.prompt_for_download": False
 })
-atexit.register(lambda: os.system("pkill chromium"))
-
 service = Service(chromedriver_path)
 driver = webdriver.Chrome(service=service, options=chrome_options)
+
+
+def _cleanup_driver():
+    if driver:
+        try:
+            driver.quit()
+        except Exception:
+            pass
+
+
+atexit.register(_cleanup_driver)
 url = 'https://data.vsin.com/nfl/vegas-odds-linetracker/'
 driver.get(url)
 try:

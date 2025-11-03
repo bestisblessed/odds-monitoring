@@ -29,10 +29,19 @@ chrome_options.add_experimental_option("prefs", {
     "download.prompt_for_download": False
 })
 
-atexit.register(lambda: os.system("pkill chromium"))
-
 service = Service(chromedriver_path)
 driver = webdriver.Chrome(service=service, options=chrome_options)
+
+
+def _cleanup_driver():
+    if driver:
+        try:
+            driver.quit()
+        except Exception:
+            pass
+
+
+atexit.register(_cleanup_driver)
 
 # URLs for both spreads and totals
 urls = {
