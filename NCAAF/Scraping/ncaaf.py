@@ -9,6 +9,7 @@ import json
 import datetime
 import csv
 import os
+import atexit
 from datetime import datetime
 import subprocess
 
@@ -27,6 +28,8 @@ chrome_options.add_experimental_option("prefs", {
     "download.default_directory": "/tmp",
     "download.prompt_for_download": False
 })
+
+atexit.register(lambda: os.system("pkill chromium"))
 
 service = Service(chromedriver_path)
 driver = webdriver.Chrome(service=service, options=chrome_options)

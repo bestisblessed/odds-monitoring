@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup
 import json
 import csv
 import os
+import atexit
 from datetime import datetime
 import subprocess
 import pandas as pd
@@ -22,6 +23,8 @@ import time
 script_dir = os.path.dirname(os.path.abspath(__file__))
 vsin_failed = False
 fightodds_failed = False
+
+atexit.register(lambda: os.system("pkill chromium"))
 
 print("UFC cron script started")
 

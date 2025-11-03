@@ -1,5 +1,6 @@
 import time
-import subprocess  
+import subprocess
+import atexit
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
@@ -26,6 +27,8 @@ chrome_options.add_experimental_option("prefs", {
     "download.default_directory": "/tmp",
     "download.prompt_for_download": False
 })
+
+atexit.register(lambda: os.system("pkill chromium"))
 
 service = Service(chromedriver_path)
 driver = webdriver.Chrome(service=service, options=chrome_options)
