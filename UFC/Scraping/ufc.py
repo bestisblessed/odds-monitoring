@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup
 import json
 import csv
 import os
+import atexit
 from datetime import datetime
 import subprocess
 import pandas as pd
@@ -25,6 +26,17 @@ fightodds_failed = False
 
 print("UFC cron script started")
 
+
+def register_driver_cleanup(driver):
+    def _cleanup():
+        try:
+            driver.quit()
+        except Exception:
+            pass
+
+    atexit.register(_cleanup)
+
+
 def setup_driver():
     chromedriver_path = "/usr/bin/chromedriver"
     chrome_options = Options()
@@ -38,7 +50,9 @@ def setup_driver():
         "download.prompt_for_download": False
     })
     service = Service(chromedriver_path)
-    return webdriver.Chrome(service=service, options=chrome_options)
+    driver = webdriver.Chrome(service=service, options=chrome_options)
+    register_driver_cleanup(driver)
+    return driver
 
 def scrape_vsin():
     driver = setup_driver()

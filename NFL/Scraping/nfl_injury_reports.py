@@ -1,5 +1,6 @@
 import time
-import subprocess  
+import subprocess
+import atexit
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
@@ -29,6 +30,17 @@ chrome_options.add_experimental_option("prefs", {
 
 service = Service(chromedriver_path)
 driver = webdriver.Chrome(service=service, options=chrome_options)
+
+
+def _cleanup_driver():
+    if driver:
+        try:
+            driver.quit()
+        except Exception:
+            pass
+
+
+atexit.register(_cleanup_driver)
 
 try:
     url = 'https://www.espn.com/nfl/injuries'

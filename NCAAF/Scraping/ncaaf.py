@@ -9,6 +9,7 @@ import json
 import datetime
 import csv
 import os
+import atexit
 from datetime import datetime
 import subprocess
 
@@ -30,6 +31,17 @@ chrome_options.add_experimental_option("prefs", {
 
 service = Service(chromedriver_path)
 driver = webdriver.Chrome(service=service, options=chrome_options)
+
+
+def _cleanup_driver():
+    if driver:
+        try:
+            driver.quit()
+        except Exception:
+            pass
+
+
+atexit.register(_cleanup_driver)
 
 # URLs for both spreads and totals
 urls = {
