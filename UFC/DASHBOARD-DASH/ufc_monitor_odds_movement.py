@@ -6,7 +6,7 @@ import re
 
 PUSHOVER_API_URL = "https://api.pushover.net/1/messages.json"
 PUSHOVER_USER_KEY = "uQiRzpo4DXghDmr9QzzfQu27cmVRsG"
-PUSHOVER_API_TOKEN = "gqjkc7u1f5z2hqk4vcp6e1u3n8p7t9x"
+PUSHOVER_API_TOKEN = "a3x2jqk1p7n9t5v8w4y6z2c1b3m5d7f9"
 
 seen_fights_file = 'data/seen_fights.txt'
 data_directory = '../Scraping/data'
