@@ -1,4 +1,3 @@
-from datadog import initialize, statsd
 import selenium
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -16,9 +15,6 @@ import subprocess
 import pandas as pd
 import re
 import time
-
-# --- Datadog setup: no API key needed, agent is local ---
-#initialize(statsd_host="localhost", statsd_port=8125)
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 vsin_failed = False
@@ -206,14 +202,6 @@ try:
         fightodds_file = os.path.join(script_dir, 'data', f'ufc_odds_fightoddsio_{datetime.now().strftime("%Y%m%d_%H%M")}.csv')
         os.makedirs(os.path.dirname(fightodds_file), exist_ok=True)
         fightodds_data.to_csv(fightodds_file, index=False)
-    # Metrics
-#    if vsin_succeeded or fightodds_succeeded:
-#        statsd.gauge("ufc_odds_monitor.success", 1)
-#    else:
-#        statsd.gauge("ufc_odds_monitor.failure", 1)
-#except Exception:
-#    statsd.gauge("ufc_odds_monitor.failure", 1)
-#    raise
         fightodds_succeeded = True
         print("FightOdds data scraped and saved.")
     except Exception:
