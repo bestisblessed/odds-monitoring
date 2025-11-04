@@ -11,6 +11,7 @@ PUSHOVER_API_TOKEN = "a75tq5kqignpk3p8ndgp66bske3bsi"
 script_dir = os.path.dirname(os.path.abspath(__file__))
 seen_fights_file = os.path.join(script_dir, 'data', 'seen_fights.txt')
 data_directory = os.path.join(script_dir, '..', 'Scraping', 'data')
+TARGET_PROMOTIONS = ("ufc", "pfl", "lfa")
 
 def normalize_text(text):
     return re.sub(r'\s+', ' ', str(text).strip())
@@ -85,6 +86,13 @@ def get_latest_vsin_file():
     files.sort(key=lambda x: re.findall(r'(\d{8}_\d{4})', x)[0], reverse=True)
     return os.path.join(data_directory, files[0]) if files else None
 
+def is_target_event(event_name):
+    if not event_name:
+        return False
+    normalized = normalize_text(event_name).lower()
+    return any(keyword in normalized for keyword in TARGET_PROMOTIONS)
+
+
 def process_fightodds_new_fights(file_path, seen_fights):
     if not file_path or not os.path.exists(file_path):
         return []
@@ -100,7 +108,7 @@ def process_fightodds_new_fights(file_path, seen_fights):
     for i, row in enumerate(rows):
         fighter = normalize_text(row.get('Fighters', ''))
         event = normalize_text(row.get('Event', ''))
-        if not fighter or not event:
+        if not fighter or not event or not is_target_event(event):
             continue
         if event not in events:
             events[event] = []
@@ -217,7 +225,10 @@ if not new_fights:
 for fight in new_fights:
     title = "🚨 OPENING ODDS 🚨"
     
-    parts = ["", f"🥊 {fight['title']}"]
+    parts = [""]
+    if fight.get('event'):
+        parts.append(f"📅 {fight['event']}")
+    parts.append(f"🥊 {fight['title']}")
     if fight.get('opponent'):
         parts.append(f"   vs. {fight['opponent']}")
     parts.append(f"💵 {fight['odds']}")

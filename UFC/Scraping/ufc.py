@@ -140,6 +140,9 @@ def parse_odds_table(html_content, event_name="Unknown Event"):
         columns = ['Event', 'Fighters'] + list(all_sportsbooks)
         return pd.DataFrame(columns=columns)
 
+TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa")
+
+
 def scrape_fightodds():
     driver = setup_driver()
     driver.get("https://fightodds.io/")
@@ -147,16 +150,20 @@ def scrape_fightodds():
     all_data = []
     try:
         event_links = driver.find_elements(By.CSS_SELECTOR, "a.MuiButtonBase-root.MuiListItem-root.MuiListItem-button")
-        ufc_event_links = []
+        target_event_links = []
         for i, link in enumerate(event_links):
             try:
                 href = link.get_attribute('href')
                 text = link.text.strip()
-                if href and text and ('ufc' in href.lower() or 'ufc' in text.lower()):
-                    ufc_event_links.append((link, text, href))
+                if not (href and text):
+                    continue
+                text_lower = text.lower()
+                href_lower = href.lower()
+                if any(keyword in text_lower or keyword in href_lower for keyword in TARGET_PROMOTION_KEYWORDS):
+                    target_event_links.append((link, text, href))
             except:
                 pass
-        for i, (link, event_name, event_url) in enumerate(ufc_event_links):
+        for i, (link, event_name, event_url) in enumerate(target_event_links):
             try:
                 driver.execute_script(f"window.open('{event_url}', '_blank');")
                 driver.switch_to.window(driver.window_handles[-1])
