@@ -12,7 +12,7 @@ PUSHOVER_API_TOKEN = "a75tq5kqignpk3p8ndgp66bske3bsi"
 script_dir = os.path.dirname(os.path.abspath(__file__))
 seen_fights_file = os.path.join(script_dir, 'data', 'seen_fights.txt')
 data_directory = os.path.join(script_dir, '..', 'Scraping', 'data')
-TARGET_PROMOTIONS = ("ufc", "pfl", "lfa", "one")
+TARGET_PROMOTIONS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "rizin")
 
 def normalize_text(text):
     return re.sub(r'\s+', ' ', str(text).strip())
@@ -239,8 +239,8 @@ for fight in new_fights:
     parts = [""]
     if fight.get('event'):
         event_name = remove_date_from_event(fight['event'])
-        parts.append(f"📅 {event_name}")
-    parts.append(f"🥊 {fight['title']}")
+        parts.append(f"📅  {event_name}")
+    parts.append(f"🥊  {fight['title']}")
     if fight.get('opponent'):
         parts.append(f"   vs. {fight['opponent']}")
     parts.append(f"💵  {fight['odds']}")

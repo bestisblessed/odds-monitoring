@@ -39,7 +39,8 @@ def register_driver_cleanup(driver):
 
 def setup_driver():
     chromedriver_path = "/usr/bin/chromedriver"
-    #chromedriver_path = "/opt/homebrew/bin/chromedriver"
+    if not os.path.exists(chromedriver_path):
+        chromedriver_path = "/opt/homebrew/bin/chromedriver"
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--disable-dev-shm-usage")
@@ -155,7 +156,7 @@ def parse_odds_table(html_content, event_name="Unknown Event"):
         columns = ['Event', 'Fighters'] + list(all_sportsbooks)
         return pd.DataFrame(columns=columns)
 
-TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one")
+TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "rizin")
 
 
 def scrape_fightodds():
@@ -178,6 +179,7 @@ def scrape_fightodds():
                 if keyword == btn_text:
                     if keyword not in clicked_promotions:
                         try:
+                            print(f"Clicking promotion button: {btn_text}")
                             driver.execute_script("arguments[0].click();", btn)
                             clicked_promotions.add(keyword)
                             time.sleep(2)
@@ -187,8 +189,22 @@ def scrape_fightodds():
         
         time.sleep(3)
         
-        event_links = driver.find_elements(By.CSS_SELECTOR, "nav a[href*='/odds/']")
+        # Find event links - both regular links and links with role='button' (LFA/ONE style)
+        # LFA events use: a.MuiButtonBase-root.MuiListItem-root with href containing '/odds/'
+        # Try multiple selectors to catch all event link variations
+        event_links = []
+        # Selector 1: Standard links in nav
+        event_links.extend(driver.find_elements(By.CSS_SELECTOR, "nav a[href*='/odds/']"))
+        # Selector 2: MuiListItem with links (LFA/ONE style)
+        event_links.extend(driver.find_elements(By.CSS_SELECTOR, "a.MuiListItem-root[href*='/odds/']"))
+        # Selector 3: Any element with role='button' and href containing '/odds/'
+        event_links.extend(driver.find_elements(By.CSS_SELECTOR, "a[role='button'][href*='/odds/']"))
+        # Selector 4: Fallback - search entire page for odds links
+        if len(event_links) == 0:
+            event_links.extend(driver.find_elements(By.CSS_SELECTOR, "a[href*='/odds/']"))
+        
         seen_hrefs = set()
+        print(f"Found {len(event_links)} event links in navigation")
         for link in event_links:
             try:
                 href = link.get_attribute('href')
@@ -200,6 +216,7 @@ def scrape_fightodds():
                 href_lower = href.lower()
                 if any(keyword in text_lower or keyword in href_lower for keyword in TARGET_PROMOTION_KEYWORDS):
                     target_event_links.append((text, href))
+                    print(f"Found target event: {text} ({href})")
             except Exception as e:
                 print(f"Error processing event link: {e}")
                 continue
@@ -218,12 +235,20 @@ def scrape_fightodds():
                     new_window = [w for w in windows if w != main_window][0]
                     try:
                         driver.switch_to.window(new_window)
-                        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CLASS_NAME, "MuiTable-root")))
+                        # Wait for table to appear, but handle empty events gracefully (LFA events may have no odds yet)
+                        try:
+                            WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CLASS_NAME, "MuiTable-root")))
+                        except:
+                            # If no table found, page might still be loading or event has no odds yet
+                            time.sleep(2)
                         time.sleep(2)
                         event_html = driver.page_source
                         event_data = parse_odds_table(event_html, event_name)
                         if not event_data.empty:
                             all_data.append(event_data)
+                        else:
+                            # Log that we found the event but it has no odds data yet (common for LFA)
+                            print(f"Event {event_name} found but has no odds data yet")
                     except Exception as e:
                         print(f"Error scraping event {event_name}: {e}")
                         import traceback
