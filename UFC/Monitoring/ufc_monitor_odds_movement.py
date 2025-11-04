@@ -90,32 +90,42 @@ def process_fightodds_new_fights(file_path, seen_fights):
         return []
     
     new_fights = []
+    rows = []
     with open(file_path, 'r') as f:
         reader = csv.DictReader(f)
-        for row in reader:
-            fighter = normalize_text(row.get('Fighters', ''))
-            event = normalize_text(row.get('Event', ''))
-            if not fighter:
-                continue
+        rows = list(reader)
+    
+    for i, row in enumerate(rows):
+        fighter = normalize_text(row.get('Fighters', ''))
+        event = normalize_text(row.get('Event', ''))
+        if not fighter:
+            continue
+        
+        opponent = None
+        if i + 1 < len(rows) and normalize_text(rows[i + 1].get('Event', '')) == event:
+            opponent = normalize_text(rows[i + 1].get('Fighters', ''))
+        elif i > 0 and normalize_text(rows[i - 1].get('Event', '')) == event:
+            opponent = normalize_text(rows[i - 1].get('Fighters', ''))
+        
+        fight_id = f"fightodds_{event}_{fighter}"
+        if fight_id not in seen_fights:
+            first_odds = None
+            first_book = None
+            for key, value in row.items():
+                if key not in ['Fighters', 'Event'] and is_valid_odds(value):
+                    if first_odds is None:
+                        first_odds = str(value).strip()
+                        first_book = key
+                        break
             
-            fight_id = f"fightodds_{event}_{fighter}"
-            if fight_id not in seen_fights:
-                first_odds = None
-                first_book = None
-                for key, value in row.items():
-                    if key not in ['Fighters', 'Event'] and is_valid_odds(value):
-                        if first_odds is None:
-                            first_odds = str(value).strip()
-                            first_book = key
-                            break
-                
-                if first_odds:
-                    new_fights.append({
-                        'fight_id': fight_id,
-                        'title': fighter,
-                        'event': event,
-                        'odds': f"{first_book}: {first_odds}"
-                    })
+            if first_odds:
+                new_fights.append({
+                    'fight_id': fight_id,
+                    'title': fighter,
+                    'opponent': opponent,
+                    'event': event,
+                    'odds': f"{first_book}: {first_odds}"
+                })
     
     return new_fights
 
@@ -140,11 +150,18 @@ def process_vsin_new_fights(file_path, seen_fights):
                 continue
             
             matchup_key = keys[1]
-            matchup = normalize_text(game.get(matchup_key, ''))
+            matchup = game.get(matchup_key, '')
             if not matchup:
                 continue
             
-            fight_id = f"vsin_{matchup}"
+            fighters = [normalize_text(f.strip()) for f in str(matchup).split('\n') if f.strip()]
+            if len(fighters) < 1:
+                continue
+            
+            fighter = fighters[0]
+            opponent = fighters[1] if len(fighters) > 1 else None
+            
+            fight_id = f"vsin_{normalize_text(matchup)}"
             if fight_id not in seen_fights:
                 first_odds = None
                 first_book = None
@@ -152,14 +169,17 @@ def process_vsin_new_fights(file_path, seen_fights):
                     if key not in ['Time', matchup_key]:
                         if is_valid_odds(value):
                             if first_odds is None:
-                                first_odds = str(value).strip()
-                                first_book = key
-                                break
+                                odds_values = str(value).strip().split('\n')
+                                if odds_values:
+                                    first_odds = odds_values[0].strip()
+                                    first_book = key
+                                    break
                 
                 if first_odds:
                     new_fights.append({
                         'fight_id': fight_id,
-                        'title': matchup,
+                        'title': fighter,
+                        'opponent': opponent,
                         'event': '',
                         'odds': f"{first_book}: {first_odds}"
                     })
@@ -186,7 +206,10 @@ if not new_fights:
 for fight in new_fights:
     title = "🚨 OPENING ODDS 🚨"
     
-    parts = ["", f"🥊 {fight['title']}", f"💵 {fight['odds']}"]
+    parts = ["", f"🥊 {fight['title']}"]
+    if fight.get('opponent'):
+        parts.append(f"   vs. {fight['opponent']}")
+    parts.append(f"💵 {fight['odds']}")
     message = "\n".join(parts)
     
     if send_pushover_notification(title, message):
