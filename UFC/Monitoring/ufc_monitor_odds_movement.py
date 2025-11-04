@@ -11,16 +11,34 @@ PUSHOVER_API_TOKEN = "a75tq5kqignpk3p8ndgp66bske3bsi"
 seen_fights_file = 'data/seen_fights.txt'
 data_directory = '../Scraping/data'
 
+def normalize_text(text):
+    return re.sub(r'\s+', ' ', str(text).strip())
+
+def is_valid_odds(value):
+    if not value:
+        return False
+    value_str = str(value).strip()
+    if not value_str or value_str == '-' or value_str == '- -' or value_str.lower() == 'n/a':
+        return False
+    odds_pattern = re.compile(r'^[+-]?\d+$')
+    return bool(odds_pattern.match(value_str))
+
 def load_seen_fights():
     if not os.path.exists(seen_fights_file):
         return set()
     with open(seen_fights_file, 'r') as f:
-        return set(line.strip() for line in f if line.strip())
+        seen = set()
+        for line in f:
+            normalized = normalize_text(line)
+            if normalized:
+                seen.add(normalized)
+        return seen
 
 def save_seen_fight(fight_id):
     os.makedirs(os.path.dirname(seen_fights_file), exist_ok=True)
+    normalized_id = normalize_text(fight_id)
     with open(seen_fights_file, 'a') as f:
-        f.write(fight_id + '\n')
+        f.write(normalized_id + '\n')
 
 def send_pushover_notification(title, message):
     if len(message) > 1024:
@@ -74,24 +92,28 @@ def process_fightodds_new_fights(file_path, seen_fights):
     with open(file_path, 'r') as f:
         reader = csv.DictReader(f)
         for row in reader:
-            fighter = row.get('Fighters', '').strip()
-            event = row.get('Event', '').strip()
+            fighter = normalize_text(row.get('Fighters', ''))
+            event = normalize_text(row.get('Event', ''))
             if not fighter:
                 continue
             
             fight_id = f"fightodds_{event}_{fighter}"
             if fight_id not in seen_fights:
-                odds_info = []
+                first_odds = None
+                first_book = None
                 for key, value in row.items():
-                    if key not in ['Fighters', 'Event'] and value and str(value).strip():
-                        odds_info.append(f"{key}: {str(value).strip()}")
+                    if key not in ['Fighters', 'Event'] and is_valid_odds(value):
+                        if first_odds is None:
+                            first_odds = str(value).strip()
+                            first_book = key
+                            break
                 
-                if odds_info:
+                if first_odds:
                     new_fights.append({
                         'fight_id': fight_id,
                         'title': fighter,
                         'event': event,
-                        'odds': '\n'.join(odds_info[:10])
+                        'odds': f"{first_book}: {first_odds}"
                     })
     
     return new_fights
@@ -117,24 +139,28 @@ def process_vsin_new_fights(file_path, seen_fights):
                 continue
             
             matchup_key = keys[1]
-            matchup = str(game.get(matchup_key, '')).strip()
+            matchup = normalize_text(game.get(matchup_key, ''))
             if not matchup:
                 continue
             
             fight_id = f"vsin_{matchup}"
             if fight_id not in seen_fights:
-                odds_info = []
+                first_odds = None
+                first_book = None
                 for key, value in game.items():
                     if key not in ['Time', matchup_key]:
-                        if value and str(value).strip():
-                            odds_info.append(f"{key}: {str(value).strip()}")
+                        if is_valid_odds(value):
+                            if first_odds is None:
+                                first_odds = str(value).strip()
+                                first_book = key
+                                break
                 
-                if odds_info:
+                if first_odds:
                     new_fights.append({
                         'fight_id': fight_id,
                         'title': matchup,
                         'event': '',
-                        'odds': '\n'.join(odds_info[:10])
+                        'odds': f"{first_book}: {first_odds}"
                     })
     except Exception as e:
         print(f"Error processing VSIN file: {e}")
@@ -164,7 +190,7 @@ for fight in new_fights:
     
     if send_pushover_notification(title, message):
         save_seen_fight(fight['fight_id'])
-        print(f"Sent notification for new fight: {fight['title']}")
+        print(f"Sent notification for: {fight['title']} - {fight['odds']}")
     else:
         print(f"Failed to send notification for: {fight['title']}")
 
