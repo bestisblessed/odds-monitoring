@@ -95,37 +95,48 @@ def process_fightodds_new_fights(file_path, seen_fights):
         reader = csv.DictReader(f)
         rows = list(reader)
     
+    # Group fighters by event
+    events = {}
     for i, row in enumerate(rows):
         fighter = normalize_text(row.get('Fighters', ''))
         event = normalize_text(row.get('Event', ''))
-        if not fighter:
+        if not fighter or not event:
             continue
-        
-        opponent = None
-        if i + 1 < len(rows) and normalize_text(rows[i + 1].get('Event', '')) == event:
-            opponent = normalize_text(rows[i + 1].get('Fighters', ''))
-        elif i > 0 and normalize_text(rows[i - 1].get('Event', '')) == event:
-            opponent = normalize_text(rows[i - 1].get('Fighters', ''))
-        
-        fight_id = f"fightodds_{event}_{fighter}"
-        if fight_id not in seen_fights:
-            first_odds = None
-            first_book = None
-            for key, value in row.items():
-                if key not in ['Fighters', 'Event'] and is_valid_odds(value):
-                    if first_odds is None:
-                        first_odds = str(value).strip()
-                        first_book = key
-                        break
+        if event not in events:
+            events[event] = []
+        events[event].append((i, fighter, row))
+    
+    # Process each event, pairing consecutive fighters
+    for event, fighters_list in events.items():
+        for idx, (i, fighter, row) in enumerate(fighters_list):
+            opponent = None
+            # Pair consecutive fighters within the same event
+            # If even index, opponent is next fighter (odd index)
+            # If odd index, opponent is previous fighter (even index)
+            if idx % 2 == 0 and idx + 1 < len(fighters_list):
+                opponent = fighters_list[idx + 1][1]
+            elif idx % 2 == 1 and idx > 0:
+                opponent = fighters_list[idx - 1][1]
             
-            if first_odds:
-                new_fights.append({
-                    'fight_id': fight_id,
-                    'title': fighter,
-                    'opponent': opponent,
-                    'event': event,
-                    'odds': f"{first_book}: {first_odds}"
-                })
+            fight_id = f"fightodds_{event}_{fighter}"
+            if fight_id not in seen_fights:
+                first_odds = None
+                first_book = None
+                for key, value in row.items():
+                    if key not in ['Fighters', 'Event'] and is_valid_odds(value):
+                        if first_odds is None:
+                            first_odds = str(value).strip()
+                            first_book = key
+                            break
+                
+                if first_odds:
+                    new_fights.append({
+                        'fight_id': fight_id,
+                        'title': fighter,
+                        'opponent': opponent,
+                        'event': event,
+                        'odds': f"{first_book}: {first_odds}"
+                    })
     
     return new_fights
 
