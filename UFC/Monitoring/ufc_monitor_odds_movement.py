@@ -183,10 +183,10 @@ if not new_fights:
     exit(0)
 
 for fight in new_fights:
-    title = f"New UFC Fight: {fight['title']}"
-    message = f"Opening Odds:\n{fight['odds']}"
-    if fight['event']:
-        message = f"Event: {fight['event']}\n{message}"
+    title = "🚨 OPENING ODDS 🚨"
+    
+    parts = ["", fight['title'], fight['odds']]
+    message = "\n".join(parts)
     
     if send_pushover_notification(title, message):
         save_seen_fight(fight['fight_id'])
