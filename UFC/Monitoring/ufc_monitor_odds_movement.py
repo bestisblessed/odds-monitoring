@@ -11,6 +11,7 @@ PUSHOVER_API_TOKEN = "a75tq5kqignpk3p8ndgp66bske3bsi"
 script_dir = os.path.dirname(os.path.abspath(__file__))
 seen_fights_file = os.path.join(script_dir, 'data', 'seen_fights.txt')
 data_directory = os.path.join(script_dir, '..', 'Scraping', 'data')
+TARGET_PROMOTIONS = ("ufc", "pfl", "lfa")
 
 def normalize_text(text):
     return re.sub(r'\s+', ' ', str(text).strip())
@@ -67,14 +68,32 @@ def send_pushover_notification(title, message):
         print(f"Error sending Pushover notification: {e}")
         return False
 
-def get_latest_fightodds_file():
+def get_latest_fightodds_files():
     if not os.path.exists(data_directory):
-        return None
-    files = [f for f in os.listdir(data_directory) if re.match(r'ufc_odds_fightoddsio_\d{8}_\d{4}\.csv', f)]
+        return {}
+
+    files = [
+        f for f in os.listdir(data_directory)
+        if re.match(r'(ufc|pfl|lfa)_odds_fightoddsio_\d{8}_\d{4}\.csv', f)
+    ]
     if not files:
-        return None
-    files.sort(key=lambda x: re.findall(r'(\d{8}_\d{4})', x)[0], reverse=True)
-    return os.path.join(data_directory, files[0]) if files else None
+        return {}
+
+    latest_files = {}
+
+    def extract_timestamp(filename):
+        match = re.search(r'(\d{8}_\d{4})', filename)
+        return match.group(1) if match else ''
+
+    for promotion in TARGET_PROMOTIONS:
+        prefix = f"{promotion}_odds_fightoddsio_"
+        promotion_files = [f for f in files if f.startswith(prefix)]
+        if not promotion_files:
+            continue
+        promotion_files.sort(key=lambda x: extract_timestamp(x), reverse=True)
+        latest_files[promotion] = os.path.join(data_directory, promotion_files[0])
+
+    return latest_files
 
 def get_latest_vsin_file():
     if not os.path.exists(data_directory):
@@ -84,6 +103,13 @@ def get_latest_vsin_file():
         return None
     files.sort(key=lambda x: re.findall(r'(\d{8}_\d{4})', x)[0], reverse=True)
     return os.path.join(data_directory, files[0]) if files else None
+
+def is_target_event(event_name):
+    if not event_name:
+        return False
+    normalized = normalize_text(event_name).lower()
+    return any(keyword in normalized for keyword in TARGET_PROMOTIONS)
+
 
 def process_fightodds_new_fights(file_path, seen_fights):
     if not file_path or not os.path.exists(file_path):
@@ -100,7 +126,7 @@ def process_fightodds_new_fights(file_path, seen_fights):
     for i, row in enumerate(rows):
         fighter = normalize_text(row.get('Fighters', ''))
         event = normalize_text(row.get('Event', ''))
-        if not fighter or not event:
+        if not fighter or not event or not is_target_event(event):
             continue
         if event not in events:
             events[event] = []
@@ -202,9 +228,9 @@ def process_vsin_new_fights(file_path, seen_fights):
 seen_fights = load_seen_fights()
 new_fights = []
 
-latest_fightodds = get_latest_fightodds_file()
-if latest_fightodds:
-    new_fights.extend(process_fightodds_new_fights(latest_fightodds, seen_fights))
+latest_fightodds_files = get_latest_fightodds_files()
+for file_path in latest_fightodds_files.values():
+    new_fights.extend(process_fightodds_new_fights(file_path, seen_fights))
 
 latest_vsin = get_latest_vsin_file()
 if latest_vsin:
@@ -217,7 +243,10 @@ if not new_fights:
 for fight in new_fights:
     title = "🚨 OPENING ODDS 🚨"
     
-    parts = ["", f"🥊 {fight['title']}"]
+    parts = [""]
+    if fight.get('event'):
+        parts.append(f"📅 {fight['event']}")
+    parts.append(f"🥊 {fight['title']}")
     if fight.get('opponent'):
         parts.append(f"   vs. {fight['opponent']}")
     parts.append(f"💵 {fight['odds']}")

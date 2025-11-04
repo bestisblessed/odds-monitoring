@@ -140,23 +140,41 @@ def parse_odds_table(html_content, event_name="Unknown Event"):
         columns = ['Event', 'Fighters'] + list(all_sportsbooks)
         return pd.DataFrame(columns=columns)
 
+PROMOTION_KEYWORDS = {
+    "ufc": ("ufc",),
+    "pfl": ("pfl", "professional fighters league"),
+    "lfa": ("lfa", "legacy fighting alliance"),
+}
+
+
+def identify_promotion(event_text, event_href):
+    combined = f"{event_text or ''} {event_href or ''}".lower()
+    for promotion, keywords in PROMOTION_KEYWORDS.items():
+        if any(keyword in combined for keyword in keywords):
+            return promotion
+    return None
+
+
 def scrape_fightodds():
     driver = setup_driver()
     driver.get("https://fightodds.io/")
     WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CLASS_NAME, "MuiTable-root")))
-    all_data = []
+    all_data = {}
     try:
         event_links = driver.find_elements(By.CSS_SELECTOR, "a.MuiButtonBase-root.MuiListItem-root.MuiListItem-button")
-        ufc_event_links = []
+        target_event_links = []
         for i, link in enumerate(event_links):
             try:
                 href = link.get_attribute('href')
                 text = link.text.strip()
-                if href and text and ('ufc' in href.lower() or 'ufc' in text.lower()):
-                    ufc_event_links.append((link, text, href))
+                if not (href and text):
+                    continue
+                promotion = identify_promotion(text, href)
+                if promotion:
+                    target_event_links.append((link, text, href, promotion))
             except:
                 pass
-        for i, (link, event_name, event_url) in enumerate(ufc_event_links):
+        for i, (link, event_name, event_url, promotion) in enumerate(target_event_links):
             try:
                 driver.execute_script(f"window.open('{event_url}', '_blank');")
                 driver.switch_to.window(driver.window_handles[-1])
@@ -166,7 +184,7 @@ def scrape_fightodds():
                     event_html = driver.page_source
                     event_data = parse_odds_table(event_html, event_name)
                     if not event_data.empty:
-                        all_data.append(event_data)
+                        all_data.setdefault(promotion, []).append(event_data)
                 except Exception:
                     pass
                 driver.close()
@@ -178,11 +196,11 @@ def scrape_fightodds():
     except Exception:
         pass
     driver.quit()
-    if all_data:
-        combined_data = pd.concat(all_data, ignore_index=True)
-        return combined_data
-    else:
-        return pd.DataFrame()
+    combined_data = {}
+    for promotion, dataframes in all_data.items():
+        if dataframes:
+            combined_data[promotion] = pd.concat(dataframes, ignore_index=True)
+    return combined_data
 
 # Main execution with independent error handling for both parts
 vsin_succeeded = False
@@ -203,19 +221,22 @@ try:
     # FightOdds
     try:
         fightodds_data = scrape_fightodds()
-        fightodds_file = os.path.join(script_dir, 'data', f'ufc_odds_fightoddsio_{datetime.now().strftime("%Y%m%d_%H%M")}.csv')
-        os.makedirs(os.path.dirname(fightodds_file), exist_ok=True)
-        fightodds_data.to_csv(fightodds_file, index=False)
-    # Metrics
-#    if vsin_succeeded or fightodds_succeeded:
-#        statsd.gauge("ufc_odds_monitor.success", 1)
-#    else:
-#        statsd.gauge("ufc_odds_monitor.failure", 1)
-#except Exception:
-#    statsd.gauge("ufc_odds_monitor.failure", 1)
-#    raise
-        fightodds_succeeded = True
-        print("FightOdds data scraped and saved.")
+        if fightodds_data:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+            fightodds_saved = False
+            for promotion, promotion_data in fightodds_data.items():
+                if promotion_data.empty:
+                    continue
+                fightodds_file = os.path.join(script_dir, 'data', f'{promotion}_odds_fightoddsio_{timestamp}.csv')
+                os.makedirs(os.path.dirname(fightodds_file), exist_ok=True)
+                promotion_data.to_csv(fightodds_file, index=False)
+                fightodds_saved = True
+                print(f"FightOdds data scraped and saved for {promotion.upper()}.")
+            fightodds_succeeded = fightodds_saved
+            if not fightodds_saved:
+                print("FightOdds scrape returned no data for targeted promotions.")
+        else:
+            print("FightOdds scrape returned no data.")
     except Exception:
         print("FightOdds scrape failed")
 except Exception:
