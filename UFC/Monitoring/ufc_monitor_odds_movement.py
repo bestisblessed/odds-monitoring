@@ -186,7 +186,7 @@ if not new_fights:
 for fight in new_fights:
     title = "🚨 OPENING ODDS 🚨"
     
-    parts = ["", fight['title'], fight['odds']]
+    parts = ["", f"🥊 {fight['title']}", f"💵 {fight['odds']}"]
     message = "\n".join(parts)
     
     if send_pushover_notification(title, message):
