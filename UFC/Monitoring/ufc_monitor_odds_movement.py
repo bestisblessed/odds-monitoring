@@ -6,14 +6,26 @@ import re
 
 PUSHOVER_API_URL = "https://api.pushover.net/1/messages.json"
 PUSHOVER_GROUP_KEY = "gvfx5duzqgajxzy3zcb9kepipm78xn"
+# PUSHOVER_GROUP_KEY = "ucdzy7t32br76dwht5qtz5mt7fg7n3"
 PUSHOVER_API_TOKEN = "a75tq5kqignpk3p8ndgp66bske3bsi"
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 seen_fights_file = os.path.join(script_dir, 'data', 'seen_fights.txt')
 data_directory = os.path.join(script_dir, '..', 'Scraping', 'data')
+TARGET_PROMOTIONS = ("ufc", "pfl", "lfa", "one")
 
 def normalize_text(text):
     return re.sub(r'\s+', ' ', str(text).strip())
+
+def remove_date_from_event(event_name):
+    """Remove date patterns like 'NOVEMBER 21 2' or 'DECEMBER 5 2' from event names."""
+    if not event_name:
+        return event_name
+    # Pattern to match: MONTH_NAME DAY NUMBER (e.g., "NOVEMBER 21 2", "DECEMBER 5 2")
+    # This matches month names followed by digits and optional trailing digits
+    date_pattern = r'\s+(?:JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s+\d+\s+\d+.*$'
+    cleaned = re.sub(date_pattern, '', event_name, flags=re.IGNORECASE)
+    return cleaned.strip()
 
 def is_valid_odds(value):
     if not value:
@@ -85,6 +97,13 @@ def get_latest_vsin_file():
     files.sort(key=lambda x: re.findall(r'(\d{8}_\d{4})', x)[0], reverse=True)
     return os.path.join(data_directory, files[0]) if files else None
 
+def is_target_event(event_name):
+    if not event_name:
+        return False
+    normalized = normalize_text(event_name).lower()
+    return any(keyword in normalized for keyword in TARGET_PROMOTIONS)
+
+
 def process_fightodds_new_fights(file_path, seen_fights):
     if not file_path or not os.path.exists(file_path):
         return []
@@ -100,7 +119,7 @@ def process_fightodds_new_fights(file_path, seen_fights):
     for i, row in enumerate(rows):
         fighter = normalize_text(row.get('Fighters', ''))
         event = normalize_text(row.get('Event', ''))
-        if not fighter or not event:
+        if not fighter or not event or not is_target_event(event):
             continue
         if event not in events:
             events[event] = []
@@ -217,10 +236,14 @@ if not new_fights:
 for fight in new_fights:
     title = "🚨 OPENING ODDS 🚨"
     
-    parts = ["", f"🥊 {fight['title']}"]
+    parts = [""]
+    if fight.get('event'):
+        event_name = remove_date_from_event(fight['event'])
+        parts.append(f"📅 {event_name}")
+    parts.append(f"🥊 {fight['title']}")
     if fight.get('opponent'):
         parts.append(f"   vs. {fight['opponent']}")
-    parts.append(f"💵 {fight['odds']}")
+    parts.append(f"💵  {fight['odds']}")
     message = "\n".join(parts)
     
     if send_pushover_notification(title, message):

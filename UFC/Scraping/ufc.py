@@ -39,6 +39,7 @@ def register_driver_cleanup(driver):
 
 def setup_driver():
     chromedriver_path = "/usr/bin/chromedriver"
+    #chromedriver_path = "/opt/homebrew/bin/chromedriver"
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--disable-dev-shm-usage")
@@ -123,7 +124,21 @@ def parse_odds_table(html_content, event_name="Unknown Event"):
                         sportsbook = sportsbooks[i]
                         button = td.find('button')
                         if button:
+                            # Try to find odds span - multiple patterns possible
+                            odds_span = None
+                            # Pattern 1: jss\d+ false (UFC/PFL style)
                             odds_span = button.find('span', {'class': re.compile('jss\\d+ false')})
+                            # Pattern 2: jss\d+ (ONE Championship style) - look for span with jss class that contains odds
+                            if not odds_span:
+                                all_spans = button.find_all('span')
+                                for span in all_spans:
+                                    span_classes = span.get('class', [])
+                                    if span_classes and any(re.match(r'jss\d+', str(c)) for c in span_classes):
+                                        text = span.text.strip()
+                                        # Check if it looks like odds (starts with + or - and has digits)
+                                        if text and re.match(r'^[+-]?\d+$', text):
+                                            odds_span = span
+                                            break
                             if odds_span:
                                 fighter_data[sportsbook] = odds_span.text.strip()
                 all_fighters_data.append(fighter_data)
@@ -140,44 +155,115 @@ def parse_odds_table(html_content, event_name="Unknown Event"):
         columns = ['Event', 'Fighters'] + list(all_sportsbooks)
         return pd.DataFrame(columns=columns)
 
+TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one")
+
+
 def scrape_fightodds():
     driver = setup_driver()
     driver.get("https://fightodds.io/")
-    WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CLASS_NAME, "MuiTable-root")))
+    time.sleep(3)
     all_data = []
     try:
-        event_links = driver.find_elements(By.CSS_SELECTOR, "a.MuiButtonBase-root.MuiListItem-root.MuiListItem-button")
-        ufc_event_links = []
-        for i, link in enumerate(event_links):
+        target_event_links = []
+        
+        nav = WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.TAG_NAME, "nav"))
+        )
+        
+        promotion_buttons = nav.find_elements(By.CSS_SELECTOR, "div[role='button']")
+        clicked_promotions = set()
+        for btn in promotion_buttons:
+            btn_text = btn.text.strip().lower()
+            for keyword in TARGET_PROMOTION_KEYWORDS:
+                if keyword == btn_text:
+                    if keyword not in clicked_promotions:
+                        try:
+                            driver.execute_script("arguments[0].click();", btn)
+                            clicked_promotions.add(keyword)
+                            time.sleep(2)
+                        except Exception as e:
+                            print(f"Error clicking promotion button {btn_text}: {e}")
+                        break
+        
+        time.sleep(3)
+        
+        event_links = driver.find_elements(By.CSS_SELECTOR, "nav a[href*='/odds/']")
+        seen_hrefs = set()
+        for link in event_links:
             try:
                 href = link.get_attribute('href')
                 text = link.text.strip()
-                if href and text and ('ufc' in href.lower() or 'ufc' in text.lower()):
-                    ufc_event_links.append((link, text, href))
-            except:
-                pass
-        for i, (link, event_name, event_url) in enumerate(ufc_event_links):
+                if not (href and text) or 'More Event' in text or href in seen_hrefs:
+                    continue
+                seen_hrefs.add(href)
+                text_lower = text.lower()
+                href_lower = href.lower()
+                if any(keyword in text_lower or keyword in href_lower for keyword in TARGET_PROMOTION_KEYWORDS):
+                    target_event_links.append((text, href))
+            except Exception as e:
+                print(f"Error processing event link: {e}")
+                continue
+        
+        if not target_event_links:
+            print("No target event links found for specified promotions.")
+        
+        main_window = driver.current_window_handle
+        for event_name, event_url in target_event_links:
             try:
+                # Open in new window
                 driver.execute_script(f"window.open('{event_url}', '_blank');")
-                driver.switch_to.window(driver.window_handles[-1])
+                time.sleep(2)
+                windows = driver.window_handles
+                if len(windows) > 1:
+                    new_window = [w for w in windows if w != main_window][0]
+                    try:
+                        driver.switch_to.window(new_window)
+                        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CLASS_NAME, "MuiTable-root")))
+                        time.sleep(2)
+                        event_html = driver.page_source
+                        event_data = parse_odds_table(event_html, event_name)
+                        if not event_data.empty:
+                            all_data.append(event_data)
+                    except Exception as e:
+                        print(f"Error scraping event {event_name}: {e}")
+                        import traceback
+                        traceback.print_exc()
+                    finally:
+                        # Close the new window and switch back to main
+                        try:
+                            driver.close()
+                        except:
+                            pass
+                        # Ensure we're back on main window
+                        try:
+                            if main_window in driver.window_handles:
+                                driver.switch_to.window(main_window)
+                            elif driver.window_handles:
+                                driver.switch_to.window(driver.window_handles[0])
+                        except:
+                            pass
+                        time.sleep(0.5)
+                else:
+                    print(f"Failed to open new window for {event_name}")
+            except Exception as e:
+                print(f"Error opening event {event_name}: {e}")
+                import traceback
+                traceback.print_exc()
+                # Ensure we're on main window
                 try:
-                    WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CLASS_NAME, "MuiTable-root")))
-                    time.sleep(2)
-                    event_html = driver.page_source
-                    event_data = parse_odds_table(event_html, event_name)
-                    if not event_data.empty:
-                        all_data.append(event_data)
-                except Exception:
+                    if main_window in driver.window_handles:
+                        driver.switch_to.window(main_window)
+                    elif driver.window_handles:
+                        driver.switch_to.window(driver.window_handles[0])
+                except:
                     pass
-                driver.close()
-                driver.switch_to.window(driver.window_handles[0])
-            except Exception:
-                if len(driver.window_handles) > 1:
-                    driver.close()
-                    driver.switch_to.window(driver.window_handles[0])
-    except Exception:
-        pass
-    driver.quit()
+    except Exception as e:
+        print(f"Error in scrape_fightodds: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        driver.quit()
+    
     if all_data:
         combined_data = pd.concat(all_data, ignore_index=True)
         return combined_data
@@ -203,23 +289,22 @@ try:
     # FightOdds
     try:
         fightodds_data = scrape_fightodds()
-        fightodds_file = os.path.join(script_dir, 'data', f'ufc_odds_fightoddsio_{datetime.now().strftime("%Y%m%d_%H%M")}.csv')
-        os.makedirs(os.path.dirname(fightodds_file), exist_ok=True)
-        fightodds_data.to_csv(fightodds_file, index=False)
-    # Metrics
-#    if vsin_succeeded or fightodds_succeeded:
-#        statsd.gauge("ufc_odds_monitor.success", 1)
-#    else:
-#        statsd.gauge("ufc_odds_monitor.failure", 1)
-#except Exception:
-#    statsd.gauge("ufc_odds_monitor.failure", 1)
-#    raise
-        fightodds_succeeded = True
-        print("FightOdds data scraped and saved.")
-    except Exception:
-        print("FightOdds scrape failed")
-except Exception:
-    print("Script execution failed")
+        if not fightodds_data.empty:
+            fightodds_file = os.path.join(script_dir, 'data', f'ufc_odds_fightoddsio_{datetime.now().strftime("%Y%m%d_%H%M")}.csv')
+            os.makedirs(os.path.dirname(fightodds_file), exist_ok=True)
+            fightodds_data.to_csv(fightodds_file, index=False)
+            fightodds_succeeded = True
+            print("FightOdds data scraped and saved.")
+        else:
+            print("FightOdds scrape returned no data.")
+    except Exception as e:
+        print(f"FightOdds scrape failed: {e}")
+        import traceback
+        traceback.print_exc()
+except Exception as e:
+    print(f"Script execution failed: {e}")
+    import traceback
+    traceback.print_exc()
 
 print("UFC cron script finished")
 
