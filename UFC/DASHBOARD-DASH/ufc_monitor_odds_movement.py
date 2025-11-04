@@ -1,31 +1,28 @@
 import os
 import csv
+import json
 import requests
+import re
 
 PUSHOVER_API_URL = "https://api.pushover.net/1/messages.json"
-PUSHOVER_USER_KEY = os.environ.get('PUSHOVER_USER_KEY')
-PUSHOVER_API_TOKEN = os.environ.get('PUSHOVER_API_TOKEN')
+PUSHOVER_USER_KEY = "uQiRzpo4DXghDmr9QzzfQu27cmVRsG"
+PUSHOVER_API_TOKEN = "gqjkc7u1f5z2hqk4vcp6e1u3n8p7t9x"
 
-csv_file_path_vsin = 'data/ufc_odds_movements.csv'
-csv_file_path_fightodds = 'data/ufc_odds_movements_fightoddsio.csv'
-sent_notifications_file = 'data/sent_notifications.txt'
+seen_fights_file = 'data/seen_fights.txt'
+data_directory = '../Scraping/data'
 
-def load_sent_notifications():
-    if not os.path.exists(sent_notifications_file):
+def load_seen_fights():
+    if not os.path.exists(seen_fights_file):
         return set()
-    with open(sent_notifications_file, 'r') as f:
+    with open(seen_fights_file, 'r') as f:
         return set(line.strip() for line in f if line.strip())
 
-def save_notification(notification_id):
-    os.makedirs(os.path.dirname(sent_notifications_file), exist_ok=True)
-    with open(sent_notifications_file, 'a') as f:
-        f.write(notification_id + '\n')
+def save_seen_fight(fight_id):
+    os.makedirs(os.path.dirname(seen_fights_file), exist_ok=True)
+    with open(seen_fights_file, 'a') as f:
+        f.write(fight_id + '\n')
 
 def send_pushover_notification(title, message):
-    if not PUSHOVER_USER_KEY or not PUSHOVER_API_TOKEN:
-        print("ERROR: PUSHOVER_USER_KEY and PUSHOVER_API_TOKEN environment variables must be set")
-        return False
-    
     data = {
         "token": PUSHOVER_API_TOKEN,
         "user": PUSHOVER_USER_KEY,
@@ -43,48 +40,124 @@ def send_pushover_notification(title, message):
         print(f"Error sending Pushover notification: {e}")
         return False
 
-def create_notification_id(row, source):
-    if source == 'vsin':
-        return f"{row['file1']}_{row['file2']}_{row['matchup']}_{row['sportsbook']}_{row['odds_before']}_{row['odds_after']}"
-    else:
-        return f"{row['file1']}_{row['file2']}_{row['fighter']}_{row['sportsbook']}_{row['odds_before']}_{row['odds_after']}"
+def get_latest_fightodds_file():
+    if not os.path.exists(data_directory):
+        return None
+    files = [f for f in os.listdir(data_directory) if re.match(r'ufc_odds_fightoddsio_\d{8}_\d{4}\.csv', f)]
+    if not files:
+        return None
+    files.sort(key=lambda x: re.findall(r'(\d{8}_\d{4})', x)[0], reverse=True)
+    return os.path.join(data_directory, files[0]) if files else None
 
-def process_csv(csv_path, source):
-    if not os.path.exists(csv_path):
+def get_latest_vsin_file():
+    if not os.path.exists(data_directory):
+        return None
+    files = [f for f in os.listdir(data_directory) if re.match(r'ufc_odds_vsin_\d{8}_\d{4}\.json', f)]
+    if not files:
+        return None
+    files.sort(key=lambda x: re.findall(r'(\d{8}_\d{4})', x)[0], reverse=True)
+    return os.path.join(data_directory, files[0]) if files else None
+
+def process_fightodds_new_fights(file_path, seen_fights):
+    if not file_path or not os.path.exists(file_path):
         return []
     
-    sent_notifications = load_sent_notifications()
-    new_movements = []
-    
-    with open(csv_path, 'r') as f:
+    new_fights = []
+    with open(file_path, 'r') as f:
         reader = csv.DictReader(f)
         for row in reader:
-            notification_id = create_notification_id(row, source)
-            if notification_id not in sent_notifications:
-                new_movements.append((notification_id, row, source))
+            fighter = row.get('Fighters', '').strip()
+            event = row.get('Event', '').strip()
+            if not fighter:
+                continue
+            
+            fight_id = f"fightodds_{event}_{fighter}"
+            if fight_id not in seen_fights:
+                odds_info = []
+                for key, value in row.items():
+                    if key not in ['Fighters', 'Event'] and value and str(value).strip():
+                        odds_info.append(f"{key}: {str(value).strip()}")
+                
+                if odds_info:
+                    new_fights.append({
+                        'fight_id': fight_id,
+                        'title': fighter,
+                        'event': event,
+                        'odds': '\n'.join(odds_info[:10])
+                    })
     
-    return new_movements
+    return new_fights
 
-all_new_movements = []
-all_new_movements.extend(process_csv(csv_file_path_vsin, 'vsin'))
-all_new_movements.extend(process_csv(csv_file_path_fightodds, 'fightodds'))
+def process_vsin_new_fights(file_path, seen_fights):
+    if not file_path or not os.path.exists(file_path):
+        return []
+    
+    new_fights = []
+    try:
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+        
+        if not isinstance(data, list):
+            return []
+        
+        for game in data:
+            if not isinstance(game, dict):
+                continue
+            
+            keys = list(game.keys())
+            if len(keys) < 2:
+                continue
+            
+            matchup_key = keys[1]
+            matchup = str(game.get(matchup_key, '')).strip()
+            if not matchup:
+                continue
+            
+            fight_id = f"vsin_{matchup}"
+            if fight_id not in seen_fights:
+                odds_info = []
+                for key, value in game.items():
+                    if key not in ['Time', matchup_key]:
+                        if value and str(value).strip():
+                            odds_info.append(f"{key}: {str(value).strip()}")
+                
+                if odds_info:
+                    new_fights.append({
+                        'fight_id': fight_id,
+                        'title': matchup,
+                        'event': '',
+                        'odds': '\n'.join(odds_info[:10])
+                    })
+    except Exception as e:
+        print(f"Error processing VSIN file: {e}")
+    
+    return new_fights
 
-if not all_new_movements:
-    print("No new odds movements detected")
+seen_fights = load_seen_fights()
+new_fights = []
+
+latest_fightodds = get_latest_fightodds_file()
+if latest_fightodds:
+    new_fights.extend(process_fightodds_new_fights(latest_fightodds, seen_fights))
+
+latest_vsin = get_latest_vsin_file()
+if latest_vsin:
+    new_fights.extend(process_vsin_new_fights(latest_vsin, seen_fights))
+
+if not new_fights:
+    print("No new fights detected")
     exit(0)
 
-for notification_id, row, source in all_new_movements:
-    if source == 'vsin':
-        title = f"UFC Odds Movement: {row['matchup']}"
-        message = f"{row['sportsbook']}: {row['odds_before']} → {row['odds_after']}\nTime: {row.get('game_time', 'N/A')}"
-    else:
-        title = f"UFC Odds Movement: {row['fighter']}"
-        message = f"{row['sportsbook']}: {row['odds_before']} → {row['odds_after']}"
+for fight in new_fights:
+    title = f"New UFC Fight: {fight['title']}"
+    message = f"Opening Odds:\n{fight['odds']}"
+    if fight['event']:
+        message = f"Event: {fight['event']}\n{message}"
     
     if send_pushover_notification(title, message):
-        save_notification(notification_id)
-        print(f"Sent notification for {title}")
+        save_seen_fight(fight['fight_id'])
+        print(f"Sent notification for new fight: {fight['title']}")
     else:
-        print(f"Failed to send notification for {title}")
+        print(f"Failed to send notification for: {fight['title']}")
 
-print(f"Processed {len(all_new_movements)} new odds movements")
+print(f"Processed {len(new_fights)} new fights")
