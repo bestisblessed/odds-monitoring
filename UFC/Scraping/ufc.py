@@ -156,7 +156,7 @@ def parse_odds_table(html_content, event_name="Unknown Event"):
         columns = ['Event', 'Fighters'] + list(all_sportsbooks)
         return pd.DataFrame(columns=columns)
 
-TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "rizin")
+TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "rizin", "brave")
 
 
 def scrape_fightodds():
@@ -171,12 +171,14 @@ def scrape_fightodds():
             EC.presence_of_element_located((By.TAG_NAME, "nav"))
         )
         
-        promotion_buttons = nav.find_elements(By.CSS_SELECTOR, "div[role='button']")
+        # select both div and a elements that act as promotion buttons (some promos are <a role='button'>)
+        promotion_buttons = nav.find_elements(By.CSS_SELECTOR, "div[role='button'], a[role='button']")
         clicked_promotions = set()
         for btn in promotion_buttons:
             btn_text = btn.text.strip().lower()
             for keyword in TARGET_PROMOTION_KEYWORDS:
-                if keyword == btn_text:
+                # match when keyword appears anywhere in the button text
+                if keyword in btn_text:
                     if keyword not in clicked_promotions:
                         try:
                             print(f"Clicking promotion button: {btn_text}")
