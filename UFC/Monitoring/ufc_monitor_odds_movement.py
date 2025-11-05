@@ -1,12 +1,11 @@
 import os
 import csv
-import json
 import requests
 import re
 
 PUSHOVER_API_URL = "https://api.pushover.net/1/messages.json"
-PUSHOVER_GROUP_KEY = "gvfx5duzqgajxzy3zcb9kepipm78xn"
-# PUSHOVER_GROUP_KEY = "ucdzy7t32br76dwht5qtz5mt7fg7n3"
+# PUSHOVER_GROUP_KEY = "gvfx5duzqgajxzy3zcb9kepipm78xn"
+PUSHOVER_GROUP_KEY = "ucdzy7t32br76dwht5qtz5mt7fg7n3"
 PUSHOVER_API_TOKEN = "a75tq5kqignpk3p8ndgp66bske3bsi"
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -57,6 +56,79 @@ def create_fight_id(event, fighter):
         # Fallback to event + fighter if no date found
         return f"fightodds_{event}_{cleaned_fighter}"
 
+
+def slugify_fighter_for_id(fighter_name):
+    """Return a filesystem/ID-safe slug for a fighter name."""
+    if not fighter_name:
+        return ''
+    cleaned = clean_fighter_name(fighter_name)
+    # replace spaces with underscores and remove characters that could vary
+    slug = re.sub(r"[^a-zA-Z0-9_]+", '', cleaned.replace(' ', '_'))
+    return slug.lower()
+
+
+def date_from_filename(file_path):
+    """Extract YYYYMMDD from filenames like ..._YYYYMMDD_HHMM.ext"""
+    if not file_path:
+        return None
+    base = os.path.basename(file_path)
+    m = re.search(r'(\d{8})_\d{4}', base)
+    if m:
+        return m.group(1)
+    # fallback: look for any 8-digit sequence
+    m2 = re.search(r'(\d{8})', base)
+    if m2:
+        return m2.group(1)
+    return None
+
+
+def normalize_date_text_to_YYYYMMDD(date_text, fallback_year=None):
+    """Try to convert date text like 'NOVEMBER 7 13' or 'NOVEMBER 7' to YYYYMMDD.
+    If year is missing, return None so caller can fallback to filename date.
+    """
+    if not date_text:
+        return None
+    # attempt to parse: MonthName Day YearOrTwoDigit
+    m = re.search(r'(?i)(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s+(\d{1,2})(?:\s+(\d{2,4}))?', date_text)
+    if not m:
+        return None
+    month_name = m.group(1)
+    day = int(m.group(2))
+    year_part = m.group(3)
+    month_num = {
+        'JANUARY':1,'FEBRUARY':2,'MARCH':3,'APRIL':4,'MAY':5,'JUNE':6,
+        'JULY':7,'AUGUST':8,'SEPTEMBER':9,'OCTOBER':10,'NOVEMBER':11,'DECEMBER':12
+    }.get(month_name.upper())
+    if not month_num:
+        return None
+    if year_part:
+        y = int(year_part)
+        if y < 100:
+            # two-digit year -> assume 2000s
+            y += 2000
+    else:
+        # no year information; let caller fallback to filename
+        return None
+    return f"{y:04d}{month_num:02d}{day:02d}"
+
+
+def canonical_fight_id(file_path, event, fighter, source='fightodds', matchup=None):
+    """Return canonical ID: fight_{YYYYMMDD}_{fighter_slug}.
+    Prefer date from event; if not present, fall back to date from filename.
+    """
+    fighter_slug = slugify_fighter_for_id(fighter)
+    # try extract date from event
+    date_text = extract_date_from_event(event) if event else None
+    date_token = None
+    if date_text:
+        date_token = normalize_date_text_to_YYYYMMDD(date_text)
+    if not date_token:
+        # fallback to filename
+        date_token = date_from_filename(file_path)
+    if not date_token:
+        date_token = 'unknown'
+    return f"fight_{date_token}_{fighter_slug}"
+
 def is_valid_odds(value):
     if not value:
         return False
@@ -67,17 +139,19 @@ def is_valid_odds(value):
     return bool(odds_pattern.match(value_str))
 
 def clean_fight_id_from_file(fight_id):
-    """Clean fighter name from a fight ID loaded from file (format: fightodds_{date}_{fighter})."""
-    if not fight_id or not fight_id.startswith('fightodds_'):
-        return normalize_text(fight_id)
-    # Split into parts: fightodds, date/event, fighter
-    parts = fight_id.split('_', 2)
-    if len(parts) >= 3:
-        date_or_event = parts[1]
-        fighter = parts[2]
-        cleaned_fighter = clean_fighter_name(fighter)
-        return f"fightodds_{date_or_event}_{cleaned_fighter}"
-    return normalize_text(fight_id)
+    """Normalize legacy fight IDs from file into a simplified token.
+    This attempts to handle previous prefixes like 'fightodds_' and 'vsin_'
+    by converting them to the canonical 'fight_{date}_{fighter_slug}' style when possible.
+    """
+    if not fight_id:
+        return ''
+    s = normalize_text(fight_id)
+    # replace known prefixes
+    s = re.sub(r'^(fightodds_|vsin_)', 'fight_', s, flags=re.IGNORECASE)
+    # replace spaces with underscores and remove excessive chars
+    s = re.sub(r'\s+', '_', s)
+    s = re.sub(r'[^a-zA-Z0-9_]', '', s)
+    return s.lower()
 
 def load_seen_fights():
     """Load seen fights from the data file, cleaning fighter names from existing entries."""
@@ -88,16 +162,16 @@ def load_seen_fights():
         for line in f:
             normalized = normalize_text(line)
             if normalized:
-                # Clean fighter names from existing entries
                 cleaned = clean_fight_id_from_file(normalized)
-                seen.add(cleaned)
+                if cleaned:
+                    seen.add(cleaned)
     return seen
 
 def save_seen_fight(fight_id):
     os.makedirs(os.path.dirname(seen_fights_file), exist_ok=True)
-    # Clean the fight ID before saving (ensure fighter names have no leading numbers)
-    cleaned_id = clean_fight_id_from_file(fight_id) if fight_id.startswith('fightodds_') else normalize_text(fight_id)
-    normalized_id = normalize_text(cleaned_id)
+    # Assume fight_id provided by processors is already canonical; normalize for safety
+    normalized_id = normalize_text(fight_id)
+    normalized_id = clean_fight_id_from_file(normalized_id)
     with open(seen_fights_file, 'a') as f:
         f.write(normalized_id + '\n')
 
@@ -136,14 +210,7 @@ def get_latest_fightodds_file():
     files.sort(key=lambda x: re.findall(r'(\d{8}_\d{4})', x)[0], reverse=True)
     return os.path.join(data_directory, files[0]) if files else None
 
-def get_latest_vsin_file():
-    if not os.path.exists(data_directory):
-        return None
-    files = [f for f in os.listdir(data_directory) if re.match(r'ufc_odds_vsin_\d{8}_\d{4}\.json', f)]
-    if not files:
-        return None
-    files.sort(key=lambda x: re.findall(r'(\d{8}_\d{4})', x)[0], reverse=True)
-    return os.path.join(data_directory, files[0]) if files else None
+
 
 def is_target_event(event_name):
     if not event_name:
@@ -186,7 +253,8 @@ def process_fightodds_new_fights(file_path, seen_fights):
             elif idx % 2 == 1 and idx > 0:
                 opponent = fighters_list[idx - 1][1]
             
-            fight_id = create_fight_id(event, fighter)
+            # build a canonical fight id using the file date as fallback
+            fight_id = canonical_fight_id(file_path, event, fighter, source='fightodds')
             normalized_fight_id = normalize_text(fight_id)
             if normalized_fight_id not in seen_fights:
                 first_odds = None
@@ -209,66 +277,7 @@ def process_fightodds_new_fights(file_path, seen_fights):
     
     return new_fights
 
-def process_vsin_new_fights(file_path, seen_fights):
-    if not file_path or not os.path.exists(file_path):
-        return []
-    
-    new_fights = []
-    try:
-        with open(file_path, 'r') as f:
-            data = json.load(f)
-        
-        if not isinstance(data, list):
-            return []
-        
-        for game in data:
-            if not isinstance(game, dict):
-                continue
-            
-            keys = list(game.keys())
-            if len(keys) < 2:
-                continue
-            
-            matchup_key = keys[1]
-            matchup = game.get(matchup_key, '')
-            if not matchup:
-                continue
-            
-            fighters_raw = [f.strip() for f in str(matchup).split('\n') if f.strip()]
-            if len(fighters_raw) < 1:
-                continue
-            
-            fighters = [clean_fighter_name(f) for f in fighters_raw]
-            fighter = fighters[0]
-            opponent = fighters[1] if len(fighters) > 1 else None
-            
-            fight_id = f"vsin_{normalize_text(matchup)}"
-            normalized_fight_id = normalize_text(fight_id)
-            if normalized_fight_id not in seen_fights:
-                first_odds = None
-                first_book = None
-                for key, value in game.items():
-                    if key not in ['Time', matchup_key]:
-                        if is_valid_odds(value):
-                            if first_odds is None:
-                                odds_values = str(value).strip().split('\n')
-                                if odds_values:
-                                    first_odds = odds_values[0].strip()
-                                    first_book = key
-                                    break
-                
-                if first_odds:
-                    new_fights.append({
-                        'fight_id': normalized_fight_id,
-                        'title': fighter,
-                        'opponent': opponent,
-                        'event': '',
-                        'odds': f"{first_book}: {first_odds}"
-                    })
-    except Exception as e:
-        print(f"Error processing VSIN file: {e}")
-    
-    return new_fights
+# VSIN processing removed — this script only processes fightodds files
 
 def clean_seen_fights_file():
     """Clean all entries in seen_fights.txt file to remove leading numbers from fighter names."""
@@ -298,9 +307,7 @@ latest_fightodds = get_latest_fightodds_file()
 if latest_fightodds:
     new_fights.extend(process_fightodds_new_fights(latest_fightodds, seen_fights))
 
-latest_vsin = get_latest_vsin_file()
-if latest_vsin:
-    new_fights.extend(process_vsin_new_fights(latest_vsin, seen_fights))
+# VSIN processing removed: only process fightodds files for opening odds notifications
 
 if not new_fights:
     print("No new fights detected")
