@@ -17,6 +17,14 @@ TARGET_PROMOTIONS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "rizin")
 def normalize_text(text):
     return re.sub(r'\s+', ' ', str(text).strip())
 
+def clean_fighter_name(fighter_name):
+    """Remove leading numbers and special characters from fighter names."""
+    if not fighter_name:
+        return fighter_name
+    # Remove leading numbers, dots, dashes, and whitespace
+    cleaned = re.sub(r'^[\d.\-\s]+', '', str(fighter_name))
+    return normalize_text(cleaned)
+
 def remove_date_from_event(event_name):
     """Remove date patterns like 'NOVEMBER 21 2' or 'DECEMBER 5 2' from event names."""
     if not event_name:
@@ -40,12 +48,14 @@ def extract_date_from_event(event_name):
 
 def create_fight_id(event, fighter):
     """Create a fight ID using fighter name + date extracted from event."""
+    # Ensure fighter name is cleaned (remove leading numbers)
+    cleaned_fighter = clean_fighter_name(fighter)
     date = extract_date_from_event(event)
     if date:
-        return f"fightodds_{date}_{fighter}"
+        return f"fightodds_{date}_{cleaned_fighter}"
     else:
         # Fallback to event + fighter if no date found
-        return f"fightodds_{event}_{fighter}"
+        return f"fightodds_{event}_{cleaned_fighter}"
 
 def is_valid_odds(value):
     if not value:
@@ -56,8 +66,21 @@ def is_valid_odds(value):
     odds_pattern = re.compile(r'^[+-]?\d+$')
     return bool(odds_pattern.match(value_str))
 
+def clean_fight_id_from_file(fight_id):
+    """Clean fighter name from a fight ID loaded from file (format: fightodds_{date}_{fighter})."""
+    if not fight_id or not fight_id.startswith('fightodds_'):
+        return normalize_text(fight_id)
+    # Split into parts: fightodds, date/event, fighter
+    parts = fight_id.split('_', 2)
+    if len(parts) >= 3:
+        date_or_event = parts[1]
+        fighter = parts[2]
+        cleaned_fighter = clean_fighter_name(fighter)
+        return f"fightodds_{date_or_event}_{cleaned_fighter}"
+    return normalize_text(fight_id)
+
 def load_seen_fights():
-    """Load seen fights from the data file."""
+    """Load seen fights from the data file, cleaning fighter names from existing entries."""
     if not os.path.exists(seen_fights_file):
         return set()
     seen = set()
@@ -65,12 +88,16 @@ def load_seen_fights():
         for line in f:
             normalized = normalize_text(line)
             if normalized:
-                seen.add(normalized)
+                # Clean fighter names from existing entries
+                cleaned = clean_fight_id_from_file(normalized)
+                seen.add(cleaned)
     return seen
 
 def save_seen_fight(fight_id):
     os.makedirs(os.path.dirname(seen_fights_file), exist_ok=True)
-    normalized_id = normalize_text(fight_id)
+    # Clean the fight ID before saving (ensure fighter names have no leading numbers)
+    cleaned_id = clean_fight_id_from_file(fight_id) if fight_id.startswith('fightodds_') else normalize_text(fight_id)
+    normalized_id = normalize_text(cleaned_id)
     with open(seen_fights_file, 'a') as f:
         f.write(normalized_id + '\n')
 
@@ -138,7 +165,8 @@ def process_fightodds_new_fights(file_path, seen_fights):
     # Group fighters by event
     events = {}
     for i, row in enumerate(rows):
-        fighter = normalize_text(row.get('Fighters', ''))
+        fighter_raw = row.get('Fighters', '')
+        fighter = clean_fighter_name(fighter_raw)
         event = normalize_text(row.get('Event', ''))
         if not fighter or not event or not is_target_event(event):
             continue
@@ -206,10 +234,11 @@ def process_vsin_new_fights(file_path, seen_fights):
             if not matchup:
                 continue
             
-            fighters = [normalize_text(f.strip()) for f in str(matchup).split('\n') if f.strip()]
-            if len(fighters) < 1:
+            fighters_raw = [f.strip() for f in str(matchup).split('\n') if f.strip()]
+            if len(fighters_raw) < 1:
                 continue
             
+            fighters = [clean_fighter_name(f) for f in fighters_raw]
             fighter = fighters[0]
             opponent = fighters[1] if len(fighters) > 1 else None
             
@@ -240,6 +269,27 @@ def process_vsin_new_fights(file_path, seen_fights):
         print(f"Error processing VSIN file: {e}")
     
     return new_fights
+
+def clean_seen_fights_file():
+    """Clean all entries in seen_fights.txt file to remove leading numbers from fighter names."""
+    if not os.path.exists(seen_fights_file):
+        return
+    # Read and clean all entries
+    cleaned_entries = set()
+    with open(seen_fights_file, 'r') as f:
+        for line in f:
+            normalized = normalize_text(line)
+            if normalized:
+                cleaned = clean_fight_id_from_file(normalized)
+                cleaned_entries.add(cleaned)
+    # Write back cleaned entries
+    os.makedirs(os.path.dirname(seen_fights_file), exist_ok=True)
+    with open(seen_fights_file, 'w') as f:
+        for entry in sorted(cleaned_entries):
+            f.write(entry + '\n')
+
+# Clean the file on startup to ensure all existing entries are cleaned
+clean_seen_fights_file()
 
 seen_fights = load_seen_fights()
 new_fights = []
