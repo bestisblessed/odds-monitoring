@@ -6,7 +6,7 @@ import re
 
 PUSHOVER_API_URL = "https://api.pushover.net/1/messages.json"
 PUSHOVER_GROUP_KEY = "gvfx5duzqgajxzy3zcb9kepipm78xn"
-#PUSHOVER_GROUP_KEY = "ucdzy7t32br76dwht5qtz5mt7fg7n3"
+# PUSHOVER_GROUP_KEY = "ucdzy7t32br76dwht5qtz5mt7fg7n3"
 PUSHOVER_API_TOKEN = "a75tq5kqignpk3p8ndgp66bske3bsi"
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -27,6 +27,26 @@ def remove_date_from_event(event_name):
     cleaned = re.sub(date_pattern, '', event_name, flags=re.IGNORECASE)
     return cleaned.strip()
 
+def extract_date_from_event(event_name):
+    """Extract date pattern like 'NOVEMBER 7 13' from event names."""
+    if not event_name:
+        return None
+    # Pattern to match: MONTH_NAME DAY NUMBER (e.g., "NOVEMBER 7 13", "DECEMBER 5 2")
+    date_pattern = r'((?:JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s+\d+\s+\d+)'
+    match = re.search(date_pattern, event_name, re.IGNORECASE)
+    if match:
+        return normalize_text(match.group(1))
+    return None
+
+def create_fight_id(event, fighter):
+    """Create a fight ID using fighter name + date extracted from event."""
+    date = extract_date_from_event(event)
+    if date:
+        return f"fightodds_{date}_{fighter}"
+    else:
+        # Fallback to event + fighter if no date found
+        return f"fightodds_{event}_{fighter}"
+
 def is_valid_odds(value):
     if not value:
         return False
@@ -37,15 +57,16 @@ def is_valid_odds(value):
     return bool(odds_pattern.match(value_str))
 
 def load_seen_fights():
+    """Load seen fights from the data file."""
     if not os.path.exists(seen_fights_file):
         return set()
+    seen = set()
     with open(seen_fights_file, 'r') as f:
-        seen = set()
         for line in f:
             normalized = normalize_text(line)
             if normalized:
                 seen.add(normalized)
-        return seen
+    return seen
 
 def save_seen_fight(fight_id):
     os.makedirs(os.path.dirname(seen_fights_file), exist_ok=True)
@@ -137,7 +158,7 @@ def process_fightodds_new_fights(file_path, seen_fights):
             elif idx % 2 == 1 and idx > 0:
                 opponent = fighters_list[idx - 1][1]
             
-            fight_id = f"fightodds_{event}_{fighter}"
+            fight_id = create_fight_id(event, fighter)
             normalized_fight_id = normalize_text(fight_id)
             if normalized_fight_id not in seen_fights:
                 first_odds = None
