@@ -46,15 +46,20 @@ def extract_date_from_event(event_name):
     return None
 
 def create_fight_id(event, fighter):
-    """Create a fight ID using fighter name + date extracted from event."""
-    # Ensure fighter name is cleaned (remove leading numbers)
+    """Create a fight ID using fighter name + a normalized YYYYMMDD date extracted from event.
+    Pads month/day to two digits (YYYYMMDD). Falls back to an event-token if date cannot be parsed.
+    """
     cleaned_fighter = clean_fighter_name(fighter)
-    date = extract_date_from_event(event)
-    if date:
-        return f"fightodds_{date}_{cleaned_fighter}"
-    else:
-        # Fallback to event + fighter if no date found
-        return f"fightodds_{event}_{cleaned_fighter}"
+    date_text = extract_date_from_event(event)
+    # prefer MMDD token from event (ignore year)
+    mmdd = normalize_date_text_to_MMDD(date_text) if date_text else None
+    if mmdd:
+        return f"fight_{mmdd}_{slugify_fighter_for_id(cleaned_fighter)}"
+    # fallback: create an event token safe for IDs
+    event_token = normalize_text(event) if event else 'unknown'
+    event_token = re.sub(r'\s+', '_', event_token)
+    event_token = re.sub(r'[^a-zA-Z0-9_]', '', event_token).lower()
+    return f"fight_{event_token}_{slugify_fighter_for_id(cleaned_fighter)}"
 
 
 def slugify_fighter_for_id(fighter_name):
@@ -112,18 +117,36 @@ def normalize_date_text_to_YYYYMMDD(date_text, fallback_year=None):
     return f"{y:04d}{month_num:02d}{day:02d}"
 
 
+def normalize_date_text_to_MMDD(date_text):
+    """Extract month/day from event text and return zero-padded MMDD (e.g. '1107')."""
+    if not date_text:
+        return None
+    m = re.search(r'(?i)(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s+(\d{1,2})', date_text)
+    if not m:
+        return None
+    month_name = m.group(1)
+    day = int(m.group(2))
+    month_num = {
+        'JANUARY':1,'FEBRUARY':2,'MARCH':3,'APRIL':4,'MAY':5,'JUNE':6,
+        'JULY':7,'AUGUST':8,'SEPTEMBER':9,'OCTOBER':10,'NOVEMBER':11,'DECEMBER':12
+    }.get(month_name.upper())
+    if not month_num:
+        return None
+    return f"{month_num:02d}{day:02d}"
+
+
 def canonical_fight_id(file_path, event, fighter, source='fightodds', matchup=None):
     """Return canonical ID: fight_{YYYYMMDD}_{fighter_slug}.
     Prefer date from event; if not present, fall back to date from filename.
     """
     fighter_slug = slugify_fighter_for_id(fighter)
-    # try extract date from event
+    # try extract month/day from event and prefer that (MMDD)
     date_text = extract_date_from_event(event) if event else None
     date_token = None
     if date_text:
-        date_token = normalize_date_text_to_YYYYMMDD(date_text)
+        date_token = normalize_date_text_to_MMDD(date_text)
+    # if no month/day from event, fall back to filename full date YYYYMMDD
     if not date_token:
-        # fallback to filename
         date_token = date_from_filename(file_path)
     if not date_token:
         date_token = 'unknown'
