@@ -3,6 +3,7 @@ import csv
 import requests
 import re
 import tweepy
+import time
 
 PUSHOVER_API_URL = "https://api.pushover.net/1/messages.json"
 # PUSHOVER_GROUP_KEY = "gvfx5duzqgajxzy3zcb9kepipm78xn"
@@ -366,6 +367,7 @@ for fight in new_fights:
         #     client.create_tweet(text=message[:280])
         # Forward to n8n webhook if configured
         if os.getenv("N8N_WEBHOOK_URL"):
+            time.sleep(2)
             requests.post(os.environ["N8N_WEBHOOK_URL"], json={"message": message}, timeout=10)
         save_seen_fight(fight['fight_id'])
         print(f"Sent notification for: {fight['title']} - {fight['odds']}")
