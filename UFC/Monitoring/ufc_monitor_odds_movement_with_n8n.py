@@ -351,24 +351,24 @@ for fight in new_fights:
     message = "\n".join(parts)
     
     if send_pushover_notification(title, message):
-        # Post to X (Twitter) if credentials are configured
-        x_api_key = os.getenv("X_API_KEY") or os.getenv("TWITTER_API_KEY")
-        x_api_secret = os.getenv("X_API_SECRET") or os.getenv("TWITTER_API_SECRET")
-        x_access_token = os.getenv("X_ACCESS_TOKEN") or os.getenv("TWITTER_ACCESS_TOKEN")
-        x_access_secret = os.getenv("X_ACCESS_SECRET") or os.getenv("TWITTER_ACCESS_SECRET")
-        if x_api_key and x_api_secret and x_access_token and x_access_secret:
-            client = tweepy.Client(
-                consumer_key=x_api_key,
-                consumer_secret=x_api_secret,
-                access_token=x_access_token,
-                access_token_secret=x_access_secret,
-            )
-            client.create_tweet(text=message[:280])
+        # # Post to X (Twitter) if credentials are configured
+        # x_api_key = os.getenv("X_API_KEY") or os.getenv("TWITTER_API_KEY")
+        # x_api_secret = os.getenv("X_API_SECRET") or os.getenv("TWITTER_API_SECRET")
+        # x_access_token = os.getenv("X_ACCESS_TOKEN") or os.getenv("TWITTER_ACCESS_TOKEN")
+        # x_access_secret = os.getenv("X_ACCESS_SECRET") or os.getenv("TWITTER_ACCESS_SECRET")
+        # if x_api_key and x_api_secret and x_access_token and x_access_secret:
+        #     client = tweepy.Client(
+        #         consumer_key=x_api_key,
+        #         consumer_secret=x_api_secret,
+        #         access_token=x_access_token,
+        #         access_token_secret=x_access_secret,
+        #     )
+        #     client.create_tweet(text=message[:280])
         # Forward to n8n webhook if configured
-        # if os.getenv("N8N_WEBHOOK_URL"):
-        #     requests.post(os.environ["N8N_WEBHOOK_URL"], json={"message": message}, timeout=10)
-        # save_seen_fight(fight['fight_id'])
-        # print(f"Sent notification for: {fight['title']} - {fight['odds']}")
+        if os.getenv("N8N_WEBHOOK_URL"):
+            requests.post(os.environ["N8N_WEBHOOK_URL"], json={"message": message}, timeout=10)
+        save_seen_fight(fight['fight_id'])
+        print(f"Sent notification for: {fight['title']} - {fight['odds']}")
     else:
         print(f"Failed to send notification for: {fight['title']}")
 
