@@ -163,8 +163,6 @@ def canonical_total_group_id(file_path, event, fighter1, fighter2):
     date_text = extract_date_from_event(event) if event else None
     date_token = normalize_date_text_to_MMDD(date_text) if date_text else None
     if not date_token:
-        date_token = date_from_filename(file_path)
-    if not date_token:
         date_token = 'unknown'
     fighter_tokens = '_'.join(filter(None, [slugify_fighter_for_id(fighter1), slugify_fighter_for_id(fighter2)]))
     if not fighter_tokens:
@@ -178,6 +176,35 @@ def canonical_total_id(file_path, event, totals_type, fighter1, fighter2):
     if not totals_token:
         totals_token = 'total'
     return f"{group_token}_{totals_token}"
+
+def extract_total_core_id(total_id):
+    """Extract the core part of a total ID (fighters + totals_type) ignoring date format.
+    Handles both old format (total_YYYYMMDD_...) and new format (total_MMDD_...).
+    Returns: total_*_fighter1_fighter2_totals_type (with date part normalized)
+    """
+    if not total_id:
+        return None
+    normalized = normalize_text(total_id)
+    # Match: total_<date>_<fighters>_<totals_type>
+    # Extract everything after the first date part
+    match = re.search(r'^total_\d+_(.+)$', normalized)
+    if match:
+        return match.group(1)
+    return normalized
+
+def is_total_already_seen(total_id, seen_totals):
+    """Check if a total is already seen, handling date format differences."""
+    normalized_total_id = clean_fight_id_from_file(normalize_text(total_id))
+    if normalized_total_id in seen_totals:
+        return True
+    # Check if any seen total has the same core (fighters + totals_type)
+    core_id = extract_total_core_id(normalized_total_id)
+    if core_id:
+        for seen_id in seen_totals:
+            seen_core = extract_total_core_id(seen_id)
+            if seen_core and seen_core == core_id:
+                return True
+    return False
 
 def is_valid_odds(value):
     if not value:
@@ -238,12 +265,15 @@ def save_seen_fight(fight_id):
     with open(seen_fights_file, 'a') as f:
         f.write(normalized_id + '\n')
 
-def save_seen_total(total_id):
+def save_seen_total(total_id, seen_totals_set=None):
     os.makedirs(os.path.dirname(seen_totals_file), exist_ok=True)
     normalized_id = normalize_text(total_id)
     normalized_id = clean_fight_id_from_file(normalized_id)
     with open(seen_totals_file, 'a') as f:
         f.write(normalized_id + '\n')
+        f.flush()
+    if seen_totals_set is not None:
+        seen_totals_set.add(normalized_id)
 
 def send_pushover_notification(title, message):
     if len(message) > 1024:
@@ -423,7 +453,7 @@ def process_fightodds_new_totals(file_path, seen_totals):
             if first_odds:
                 total_id = canonical_total_id(file_path, event, totals_type, fighter1, fighter2)
                 normalized_total_id = clean_fight_id_from_file(normalize_text(total_id))
-                if normalized_total_id in seen_totals:
+                if is_total_already_seen(normalized_total_id, seen_totals):
                     continue
                 matchup = None
                 if fighter1 and fighter2:
@@ -499,7 +529,7 @@ for total_group in new_totals:
     
     if send_pushover_notification(title, message):
         for total_id in total_group['total_ids']:
-            save_seen_total(total_id)
+            save_seen_total(total_id, seen_totals)
         print(f"Sent totals notification for: {total_group.get('matchup', total_group.get('event', 'Totals'))}")
     else:
         print("Failed to send totals notification for totals group")
