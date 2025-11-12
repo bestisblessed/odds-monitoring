@@ -432,6 +432,10 @@ def process_fightodds_new_totals(file_path, seen_totals):
         reader = csv.DictReader(f)
         for row in reader:
             totals_type = normalize_text(row.get('Totals_Type', ''))
+            # Skip 0.5 round totals (e.g., "Over 0.5 rounds", "Under 0.5 rounds")
+            # These are typically opening lines that the user does not want notifications for.
+            if re.search(r'0\.5', totals_type):
+                continue
             event = normalize_text(row.get('Event', ''))
             if not totals_type or not event or not is_target_event(event):
                 continue
