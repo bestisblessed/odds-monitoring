@@ -46,6 +46,10 @@ def setup_driver():
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--user-data-dir=/tmp/chrome-temp")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--disable-extensions")
+    # chrome_options.add_argument("--disable-images")
+    # chrome_options.add_argument("--disable-javascript")  # We'll enable it selectively if needed
     chrome_options.add_experimental_option("prefs", {
         "profile.default_content_settings.popups": 0,
         "download.default_directory": "/tmp",

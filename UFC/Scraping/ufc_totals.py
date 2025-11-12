@@ -6,6 +6,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from bs4 import BeautifulSoup
 import json
 import csv
@@ -28,6 +29,21 @@ def clean_event_name(name: str) -> str:
     cleaned = re.sub(r"\s+\d{1,3}$", "", cleaned)
     return cleaned
 
+def is_combination_prop(totals_type: str) -> bool:
+    """Check if totals_type is a combination prop (fighter name + over/under)."""
+    if not totals_type:
+        return False
+    totals_lower = totals_type.lower()
+    # Combination props contain patterns like:
+    # - "wins and" + over/under
+    # - "doesn't win or" + over/under
+    # - "doesn't win and" + over/under
+    # - "wins or" + over/under
+    has_win_condition = re.search(r'\b(wins|win)\s+(and|or)\b', totals_lower) or \
+                       re.search(r"\bdoesn'?t\s+win\s+(and|or)\b", totals_lower)
+    has_over_under = re.search(r'\b(over|under)\s+\d+\.?\d*\s+rounds?\b', totals_lower)
+    return bool(has_win_condition and has_over_under)
+
 def register_driver_cleanup(driver):
     def _cleanup():
         try:
@@ -45,6 +61,11 @@ def setup_driver():
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--user-data-dir=/tmp/chrome-temp")
+    chrome_options.add_argument("--disable-gpu")
+    # chrome_options.add_argument("--disable-images")
+    # chrome_options.add_argument("--disable-javascript")  # We'll enable it selectively if needed
+    chrome_options.add_argument("--disable-extensions")
+    # chrome_options.add_argument("--disable-plugins")
     chrome_options.add_experimental_option("prefs", {
         "profile.default_content_settings.popups": 0,
         "download.default_directory": "/tmp",
@@ -138,6 +159,10 @@ def parse_totals_table(html_content, event_name="Unknown Event"):
                             break
                 
                 if is_totals_row:
+                    # Filter out combination props (fighter name + over/under)
+                    if is_combination_prop(totals_type):
+                        continue
+                    
                     totals_data = {
                         'Event': clean_event_name(event_name),
                         'Fighter1': current_fighter_1 or '',
@@ -207,14 +232,13 @@ TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "riz
 def scrape_fightodds_totals():
     driver = setup_driver()
     driver.get("https://fightodds.io/")
-    time.sleep(3)
+    # Wait for page to load and nav to appear
+    nav = WebDriverWait(driver, 20).until(
+        EC.presence_of_element_located((By.TAG_NAME, "nav"))
+    )
     all_data = []
     try:
         target_event_links = []
-        
-        nav = WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.TAG_NAME, "nav"))
-        )
         
         # Click promotion buttons
         promotion_buttons = nav.find_elements(By.CSS_SELECTOR, "div[role='button'], a[role='button']")
@@ -227,12 +251,14 @@ def scrape_fightodds_totals():
                         try:
                             driver.execute_script("arguments[0].click();", btn)
                             clicked_promotions.add(keyword)
-                            time.sleep(2)
+                            # Brief wait for navigation to update after clicking
+                            time.sleep(0.5)
                         except Exception as e:
                             print(f"Error clicking promotion button {btn_text}: {e}")
                         break
         
-        time.sleep(3)
+        # Brief wait for all navigation updates to complete
+        time.sleep(1)
         
         # Find event links
         event_links = []
@@ -265,48 +291,58 @@ def scrape_fightodds_totals():
         for event_name, event_url in target_event_links:
             try:
                 driver.execute_script(f"window.open('{event_url}', '_blank');")
-                time.sleep(2)
+                # Wait for new window to open
+                WebDriverWait(driver, 10).until(lambda d: len(d.window_handles) > 1)
                 windows = driver.window_handles
                 if len(windows) > 1:
                     new_window = [w for w in windows if w != main_window][0]
                     try:
                         driver.switch_to.window(new_window)
+                        
+                        # Wait for page to be fully loaded
+                        WebDriverWait(driver, 20).until(
+                            lambda d: d.execute_script("return document.readyState") == "complete"
+                        )
+                        
+                        # Check if table exists - some events may not have odds/totals yet
+                        table = None
                         try:
-                            table = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CLASS_NAME, "MuiTable-root")))
-                        except:
-                            time.sleep(2)
-                            table = driver.find_element(By.CLASS_NAME, "MuiTable-root")
+                            table = WebDriverWait(driver, 10).until(
+                                EC.presence_of_element_located((By.CLASS_NAME, "MuiTable-root"))
+                            )
+                        except (TimeoutException, NoSuchElementException):
+                            # Table doesn't exist, skip this event gracefully
+                            pass
                         
-                        time.sleep(2)
-                        
-                        # Scroll to table
-                        driver.execute_script("arguments[0].scrollIntoView(true);", table)
-                        time.sleep(1)
-                        
-                        # Click expand buttons for each fight row to reveal totals
-                        # Find all fighter rows (rows with fighter links)
-                        rows = table.find_elements(By.CSS_SELECTOR, "tbody tr")
-                        
-                        # Click expand buttons to reveal totals for all rows on the card
-                        for row_idx, row in enumerate(rows):
-                            # Use the small contained-size button that expands markets/totals for the row
-                            small_buttons = row.find_elements(By.CSS_SELECTOR, "button.MuiButton-containedSizeSmall")
-                            if small_buttons:
-                                try:
-                                    driver.execute_script("arguments[0].scrollIntoView({block:'center'})", small_buttons[0])
-                                    driver.execute_script("arguments[0].click();", small_buttons[0])
-                                    time.sleep(0.8)  # Allow DOM to render expanded rows
-                                except:
-                                    pass
-                        
-                        # Wait for any expanded content to appear
-                        time.sleep(2)
-                        
-                        # Parse totals from the page (they may appear as new rows or in popovers)
-                        event_html = driver.page_source
-                        event_data = parse_totals_table(event_html, event_name)
-                        if not event_data.empty:
-                            all_data.append(event_data)
+                        if table:
+                            # Scroll to table
+                            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", table)
+                            # Brief wait for scroll animation
+                            time.sleep(0.5)
+                            
+                            # Try to find and click expand buttons if they exist
+                            # Some events may not have expand buttons (no totals available yet)
+                            try:
+                                expand_buttons = driver.find_elements(By.CSS_SELECTOR, ".MuiTable-root tbody tr button.MuiButton-containedSizeSmall")
+                                if expand_buttons:
+                                    for button in expand_buttons:
+                                        try:
+                                            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", button)
+                                            driver.execute_script("arguments[0].click();", button)
+                                            time.sleep(0.5)
+                                        except:
+                                            pass
+                                    # Brief wait for all expanded content to render
+                                    time.sleep(1)
+                            except:
+                                # No expand buttons found or error, continue to parsing
+                                pass
+                            
+                            # Parse totals from the page (they may appear as new rows or in popovers)
+                            event_html = driver.page_source
+                            event_data = parse_totals_table(event_html, event_name)
+                            if not event_data.empty:
+                                all_data.append(event_data)
                     except Exception as e:
                         print(f"Error scraping totals for event {event_name}: {e}")
                         import traceback
@@ -323,7 +359,6 @@ def scrape_fightodds_totals():
                                 driver.switch_to.window(driver.window_handles[0])
                         except:
                             pass
-                        time.sleep(0.5)
                 else:
                     print(f"Failed to open new window for {event_name}")
             except Exception as e:
