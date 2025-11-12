@@ -179,6 +179,26 @@ def canonical_total_id(file_path, event, totals_type, fighter1, fighter2):
         totals_token = 'total'
     return f"{group_token}_{totals_token}"
 
+def canonical_moneyline_group_id(file_path, event, fighter1, fighter2):
+    date_text = extract_date_from_event(event) if event else None
+    date_token = normalize_date_text_to_MMDD(date_text) if date_text else None
+    if not date_token:
+        date_token = date_from_filename(file_path)
+    if not date_token:
+        date_token = 'unknown'
+    fighter_slugs = sorted(filter(None, [
+        slugify_fighter_for_id(fighter1),
+        slugify_fighter_for_id(fighter2)
+    ]))
+    if fighter_slugs:
+        fighter_token = '_'.join(fighter_slugs)
+    else:
+        fighter_token = 'unknown'
+    event_token = normalize_text(event) if event else ''
+    event_token = re.sub(r'\s+', '_', event_token)
+    event_token = re.sub(r'[^a-zA-Z0-9_]', '', event_token).lower()
+    return f"fightgroup_{date_token}_{fighter_token}_{event_token}"
+
 def is_valid_odds(value):
     if not value:
         return False
@@ -302,15 +322,13 @@ def process_fightodds_new_fights(file_path, seen_fights):
     if not file_path or not os.path.exists(file_path):
         return []
     
-    new_fights = []
     rows = []
     with open(file_path, 'r') as f:
         reader = csv.DictReader(f)
         rows = list(reader)
     
-    # Group fighters by event
     events = {}
-    for i, row in enumerate(rows):
+    for index_order, row in enumerate(rows):
         fighter_raw = row.get('Fighters', '')
         fighter = clean_fighter_name(fighter_raw)
         event = normalize_text(row.get('Event', ''))
@@ -318,42 +336,68 @@ def process_fightodds_new_fights(file_path, seen_fights):
             continue
         if event not in events:
             events[event] = []
-        events[event].append((i, fighter, row))
+        events[event].append((index_order, fighter, row))
     
-    # Process each event, pairing consecutive fighters
+    grouped_fights = {}
+    event_state = {}
     for event, fighters_list in events.items():
         fighters_list.sort(key=lambda x: x[0])
-        index = 0
-        while index < len(fighters_list):
-            pair_entries = fighters_list[index:index + 2]
-            index += 2
-            fighters_info = []
-            new_ids = []
-            for _, fighter, row in pair_entries:
-                fight_id = canonical_fight_id(file_path, event, fighter, source='fightodds')
-                normalized_fight_id = normalize_text(fight_id)
-                first_odds = None
-                first_book = None
-                for key, value in row.items():
-                    if key not in ['Fighters', 'Event'] and is_valid_odds(value):
-                        first_odds = str(value).strip()
-                        first_book = key
-                        break
-                if not first_odds:
+        event_state[event] = {'pending': None}
+        for order_index, fighter, row in fighters_list:
+            fight_id = canonical_fight_id(file_path, event, fighter, source='fightodds')
+            normalized_fight_id = normalize_text(fight_id)
+            first_odds = None
+            first_book = None
+            for key, value in row.items():
+                if key in ['Fighters', 'Event']:
                     continue
-                fighters_info.append({
-                    'name': fighter,
-                    'book': first_book,
-                    'odds': first_odds
-                })
-                if normalized_fight_id not in seen_fights:
-                    new_ids.append(normalized_fight_id)
-            if fighters_info and new_ids:
-                new_fights.append({
-                    'event': event,
-                    'fighters': fighters_info,
-                    'fight_ids': new_ids
-                })
+                if is_valid_odds(value):
+                    first_odds = str(value).strip()
+                    first_book = key
+                    break
+            if not first_odds:
+                continue
+            fighter_entry = {
+                'name': fighter,
+                'book': first_book,
+                'odds': first_odds,
+                'fight_id': normalized_fight_id,
+                'order': order_index
+            }
+            pending_entry = event_state[event]['pending']
+            if pending_entry:
+                if pending_entry['fight_id'] == fighter_entry['fight_id']:
+                    event_state[event]['pending'] = fighter_entry
+                    continue
+                group_id_raw = canonical_moneyline_group_id(file_path, event, pending_entry['name'], fighter_entry['name'])
+                group_id = clean_fight_id_from_file(normalize_text(group_id_raw))
+                if group_id not in grouped_fights:
+                    grouped_fights[group_id] = {
+                        'event': event,
+                        'fighters': []
+                    }
+                group_entry = grouped_fights[group_id]
+                for entry in sorted([pending_entry, fighter_entry], key=lambda e: e['order']):
+                    if not any(existing['fight_id'] == entry['fight_id'] for existing in group_entry['fighters']):
+                        group_entry['fighters'].append(entry)
+                event_state[event]['pending'] = None
+            else:
+                event_state[event]['pending'] = fighter_entry
+    
+    new_fights = []
+    for group in grouped_fights.values():
+        fighters = group['fighters']
+        if not fighters:
+            continue
+        fighters.sort(key=lambda e: e['order'])
+        new_ids = [fighter['fight_id'] for fighter in fighters if fighter['fight_id'] not in seen_fights]
+        if not new_ids:
+            continue
+        new_fights.append({
+            'event': group['event'],
+            'fighters': [{'name': fighter['name'], 'book': fighter['book'], 'odds': fighter['odds']} for fighter in fighters],
+            'fight_ids': new_ids
+        })
     
     return new_fights
 
