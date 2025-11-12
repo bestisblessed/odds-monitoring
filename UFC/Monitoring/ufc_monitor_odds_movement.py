@@ -159,6 +159,21 @@ def canonical_fight_id(file_path, event, fighter, source='fightodds', matchup=No
         date_token = 'unknown'
     return f"fight_{date_token}_{fighter_slug}"
 
+def canonical_matchup_group_id(file_path, event, fighter1, fighter2):
+    """Create a group ID for a matchup (fight) that combines both fighters."""
+    date_text = extract_date_from_event(event) if event else None
+    date_token = normalize_date_text_to_MMDD(date_text) if date_text else None
+    if not date_token:
+        date_token = date_from_filename(file_path)
+    if not date_token:
+        date_token = 'unknown'
+    # Sort fighter names alphabetically to ensure consistent grouping
+    fighters = sorted([slugify_fighter_for_id(fighter1), slugify_fighter_for_id(fighter2)])
+    fighter_tokens = '_'.join(filter(None, fighters))
+    if not fighter_tokens:
+        fighter_tokens = 'unknown'
+    return f"matchup_{date_token}_{fighter_tokens}"
+
 def canonical_total_group_id(file_path, event, fighter1, fighter2):
     date_text = extract_date_from_event(event) if event else None
     date_token = normalize_date_text_to_MMDD(date_text) if date_text else None
@@ -351,7 +366,8 @@ def process_fightodds_new_fights(file_path, seen_fights):
                         'title': fighter,
                         'opponent': opponent,
                         'event': event,
-                        'odds': f"{first_book}: {first_odds}"
+                        'odds': f"{first_book}: {first_odds}",
+                        'file_path': file_path
                     })
     
     return new_fights
@@ -467,22 +483,52 @@ if not new_fights and not new_totals:
     print("No new odds detected")
     exit(0)
 
+# Group fights by matchup
+matchup_groups = {}
 for fight in new_fights:
+    fighter1 = fight['title']
+    fighter2 = fight.get('opponent')
+    file_path = fight.get('file_path')
+    if not fighter2:
+        # If no opponent, treat as individual fight
+        matchup_key = f"{fight['event']}_{fighter1}"
+    else:
+        matchup_key = canonical_matchup_group_id(file_path, fight['event'], fighter1, fighter2)
+    
+    if matchup_key not in matchup_groups:
+        matchup_groups[matchup_key] = {
+            'event': fight['event'],
+            'fighters': []
+        }
+    
+    matchup_groups[matchup_key]['fighters'].append({
+        'name': fighter1,
+        'odds': fight['odds'],
+        'fight_id': fight['fight_id']
+    })
+
+# Send combined notifications for each matchup
+for matchup_key, group in matchup_groups.items():
     title = "🚨 OPENING ODDS 🚨"
     
     parts = [""]
-    if fight.get('event'):
-        event_name = remove_date_from_event(fight['event'])
+    if group.get('event'):
+        event_name = remove_date_from_event(group['event'])
         parts.append(f"📅  {event_name}")
-    parts.append(f"🥊  {fight['title']}")
-    parts.append(f"💵  {fight['odds']}")
+    
+    for fighter in group['fighters']:
+        parts.append(f"💵  {fighter['name']} - {fighter['odds']}")
+    
     message = "\n".join(parts)
     
     if send_pushover_notification(title, message):
-        save_seen_fight(fight['fight_id'])
-        print(f"Sent notification for: {fight['title']} - {fight['odds']}")
+        for fighter in group['fighters']:
+            save_seen_fight(fighter['fight_id'])
+        fighter_names = " vs ".join([f['name'] for f in group['fighters']])
+        print(f"Sent notification for: {fighter_names}")
     else:
-        print(f"Failed to send notification for: {fight['title']}")
+        fighter_names = " vs ".join([f['name'] for f in group['fighters']])
+        print(f"Failed to send notification for: {fighter_names}")
 
 for total_group in new_totals:
     title = "🚨 TOTALS OPENING ODDS 🚨"
