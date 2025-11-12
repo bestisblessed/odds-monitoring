@@ -123,11 +123,15 @@ def parse_odds_table(html_content, event_name="Unknown Event"):
             
             for tr in tbody.find_all('tr'):
                 fighter_data = {'Event': event_name}
-                fighter_link = tr.find('a', href=True)
+                fighter_link = tr.find('a')
                 
                 # Detect fighter rows and maintain the current pairing context
-                if fighter_link and '/fighters/' in fighter_link.get('href', ''):
+                if fighter_link:
                     fighter_name = fighter_link.text.strip()
+                    if not fighter_name:
+                        continue
+                    
+                    # Update pairing context
                     if not last_fighter_name:
                         last_fighter_name = fighter_name
                     else:
