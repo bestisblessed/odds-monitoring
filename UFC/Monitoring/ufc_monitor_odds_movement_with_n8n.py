@@ -13,7 +13,7 @@ PUSHOVER_API_TOKEN = "a75tq5kqignpk3p8ndgp66bske3bsi"
 script_dir = os.path.dirname(os.path.abspath(__file__))
 seen_fights_file = os.path.join(script_dir, 'data', 'seen_fights.txt')
 data_directory = os.path.join(script_dir, '..', 'Scraping', 'data')
-TARGET_PROMOTIONS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "rizin", "bcf", "brave", "uae warriors", "uaew")
+TARGET_PROMOTIONS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "rizin", "bcf", "brave", "uaew", "ksw")
 
 def normalize_text(text):
     return re.sub(r'\s+', ' ', str(text).strip())
