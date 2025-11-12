@@ -216,7 +216,9 @@ def scrape_fightodds():
                 href_lower = href.lower()
                 if any(keyword in text_lower or keyword in href_lower for keyword in TARGET_PROMOTION_KEYWORDS):
                     target_event_links.append((text, href))
-                    print(text)
+                    # Print only the first line (event name), skip numbers on subsequent lines
+                    event_name = text.split('\n')[0].strip()
+                    print(event_name)
             except Exception as e:
                 print(f"Error processing event link: {e}")
                 continue
