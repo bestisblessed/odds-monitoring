@@ -36,6 +36,9 @@ def remove_date_from_event(event_name):
     # This matches month names followed by digits and optional trailing digits
     date_pattern = r'\s+(?:JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s+\d+\s+\d+.*$'
     cleaned = re.sub(date_pattern, '', event_name, flags=re.IGNORECASE)
+    # Remove trailing standalone month names (e.g., "UFC 322 ... NOVEMBER")
+    month_only_pattern = r'\s+(?:JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)$'
+    cleaned = re.sub(month_only_pattern, '', cleaned, flags=re.IGNORECASE)
     return cleaned.strip()
 
 def extract_date_from_event(event_name):
