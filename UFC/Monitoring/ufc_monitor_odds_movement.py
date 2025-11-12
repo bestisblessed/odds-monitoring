@@ -344,8 +344,6 @@ for fight in new_fights:
         event_name = remove_date_from_event(fight['event'])
         parts.append(f"📅  {event_name}")
     parts.append(f"🥊  {fight['title']}")
-    if fight.get('opponent'):
-        parts.append(f"   vs. {fight['opponent']}")
     parts.append(f"💵  {fight['odds']}")
     message = "\n".join(parts)
     
