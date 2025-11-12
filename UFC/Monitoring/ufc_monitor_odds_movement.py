@@ -156,7 +156,7 @@ def canonical_fight_id(file_path, event, fighter, source='fightodds', matchup=No
         date_token = 'unknown'
     return f"fight_{date_token}_{fighter_slug}"
 
-def canonical_total_id(file_path, event, totals_type, fighter1, fighter2):
+def canonical_total_group_id(file_path, event, fighter1, fighter2):
     date_text = extract_date_from_event(event) if event else None
     date_token = normalize_date_text_to_MMDD(date_text) if date_text else None
     if not date_token:
@@ -166,11 +166,15 @@ def canonical_total_id(file_path, event, totals_type, fighter1, fighter2):
     fighter_tokens = '_'.join(filter(None, [slugify_fighter_for_id(fighter1), slugify_fighter_for_id(fighter2)]))
     if not fighter_tokens:
         fighter_tokens = 'unknown'
+    return f"total_{date_token}_{fighter_tokens}"
+
+def canonical_total_id(file_path, event, totals_type, fighter1, fighter2):
+    group_token = canonical_total_group_id(file_path, event, fighter1, fighter2)
     totals_token = normalize_text(totals_type).lower().replace(' ', '_')
     totals_token = re.sub(r'[^a-z0-9_]', '', totals_token)
     if not totals_token:
         totals_token = 'total'
-    return f"total_{date_token}_{fighter_tokens}_{totals_token}"
+    return f"{group_token}_{totals_token}"
 
 def is_valid_odds(value):
     if not value:
@@ -392,7 +396,7 @@ clean_seen_totals_file()
 def process_fightodds_new_totals(file_path, seen_totals):
     if not file_path or not os.path.exists(file_path):
         return []
-    new_totals = []
+    groups = {}
     with open(file_path, 'r') as f:
         reader = csv.DictReader(f)
         for row in reader:
@@ -402,10 +406,8 @@ def process_fightodds_new_totals(file_path, seen_totals):
                 continue
             fighter1 = clean_fighter_name(row.get('Fighter1', ''))
             fighter2 = clean_fighter_name(row.get('Fighter2', ''))
-            total_id = canonical_total_id(file_path, event, totals_type, fighter1, fighter2)
-            normalized_total_id = clean_fight_id_from_file(normalize_text(total_id))
-            if normalized_total_id in seen_totals:
-                continue
+            group_token = canonical_total_group_id(file_path, event, fighter1, fighter2)
+            normalized_group_id = clean_fight_id_from_file(normalize_text(group_token))
             first_odds = None
             first_book = None
             for key, value in row.items():
@@ -416,19 +418,34 @@ def process_fightodds_new_totals(file_path, seen_totals):
                     first_book = key
                     break
             if first_odds:
+                total_id = canonical_total_id(file_path, event, totals_type, fighter1, fighter2)
+                normalized_total_id = clean_fight_id_from_file(normalize_text(total_id))
+                if normalized_total_id in seen_totals:
+                    continue
                 matchup = None
                 if fighter1 and fighter2:
                     matchup = f"{fighter1} vs {fighter2}"
                 elif fighter1 or fighter2:
                     matchup = fighter1 or fighter2
-                new_totals.append({
-                    'total_id': normalized_total_id,
-                    'event': event,
-                    'matchup': matchup,
+                if normalized_group_id not in groups:
+                    groups[normalized_group_id] = {
+                        'group_id': normalized_group_id,
+                        'event': event,
+                        'matchup': matchup,
+                        'totals': [],
+                        'total_ids': []
+                    }
+                group_entry = groups[normalized_group_id]
+                if not group_entry.get('matchup') and matchup:
+                    group_entry['matchup'] = matchup
+                group_entry['totals'].append({
                     'totals_type': totals_type,
-                    'odds': f"{first_book}: {first_odds}"
+                    'odds': f"{first_book}: {first_odds}",
+                    'total_id': normalized_total_id
                 })
-    return new_totals
+                group_entry['total_ids'].append(normalized_total_id)
+    # Filter out groups with no totals (in case all were seen)
+    return [group for group in groups.values() if group['totals']]
 
 seen_fights = load_seen_fights()
 seen_totals = load_seen_totals()
@@ -464,24 +481,25 @@ for fight in new_fights:
     else:
         print(f"Failed to send notification for: {fight['title']}")
 
-for total in new_totals:
+for total_group in new_totals:
     title = "🚨 TOTALS OPENING ODDS 🚨"
     
     parts = [""]
-    if total.get('event'):
-        event_name = remove_date_from_event(total['event'])
+    if total_group.get('event'):
+        event_name = remove_date_from_event(total_group['event'])
         parts.append(f"📅  {event_name}")
-    if total.get('matchup'):
-        parts.append(f"🥊  {total['matchup']}")
-    parts.append(f"📈  {total['totals_type']}")
-    parts.append(f"💵  {total['odds']}")
+    if total_group.get('matchup'):
+        parts.append(f"🥊  {total_group['matchup']}")
+    for totals_entry in total_group['totals']:
+        parts.append(f"📈  {totals_entry['totals_type']} — {totals_entry['odds']}")
     message = "\n".join(parts)
     
     if send_pushover_notification(title, message):
-        save_seen_total(total['total_id'])
-        print(f"Sent totals notification for: {total['totals_type']} - {total['odds']}")
+        for total_id in total_group['total_ids']:
+            save_seen_total(total_id)
+        print(f"Sent totals notification for: {total_group.get('matchup', total_group.get('event', 'Totals'))}")
     else:
-        print(f"Failed to send totals notification for: {total['totals_type']}")
+        print("Failed to send totals notification for totals group")
 
 if new_fights:
     print(f"Processed {len(new_fights)} new fights")
