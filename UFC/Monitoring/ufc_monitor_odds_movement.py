@@ -2,6 +2,9 @@ import os
 import csv
 import requests
 import re
+import time
+
+time.sleep(30)
 
 PUSHOVER_API_URL = "https://api.pushover.net/1/messages.json"
 PUSHOVER_GROUP_KEY = "gvfx5duzqgajxzy3zcb9kepipm78xn"
