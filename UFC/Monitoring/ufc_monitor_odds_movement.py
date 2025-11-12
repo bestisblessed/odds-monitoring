@@ -238,12 +238,15 @@ def save_seen_fight(fight_id):
     with open(seen_fights_file, 'a') as f:
         f.write(normalized_id + '\n')
 
-def save_seen_total(total_id):
+def save_seen_total(total_id, seen_totals_set=None):
     os.makedirs(os.path.dirname(seen_totals_file), exist_ok=True)
     normalized_id = normalize_text(total_id)
     normalized_id = clean_fight_id_from_file(normalized_id)
     with open(seen_totals_file, 'a') as f:
         f.write(normalized_id + '\n')
+        f.flush()
+    if seen_totals_set is not None:
+        seen_totals_set.add(normalized_id)
 
 def send_pushover_notification(title, message):
     if len(message) > 1024:
@@ -499,7 +502,7 @@ for total_group in new_totals:
     
     if send_pushover_notification(title, message):
         for total_id in total_group['total_ids']:
-            save_seen_total(total_id)
+            save_seen_total(total_id, seen_totals)
         print(f"Sent totals notification for: {total_group.get('matchup', total_group.get('event', 'Totals'))}")
     else:
         print("Failed to send totals notification for totals group")
