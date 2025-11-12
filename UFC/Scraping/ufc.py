@@ -181,7 +181,6 @@ def scrape_fightodds():
                 if keyword in btn_text:
                     if keyword not in clicked_promotions:
                         try:
-                            print(f"Clicking promotion button: {btn_text}")
                             driver.execute_script("arguments[0].click();", btn)
                             clicked_promotions.add(keyword)
                             time.sleep(2)
@@ -206,7 +205,6 @@ def scrape_fightodds():
             event_links.extend(driver.find_elements(By.CSS_SELECTOR, "a[href*='/odds/']"))
         
         seen_hrefs = set()
-        print(f"Found {len(event_links)} event links in navigation")
         for link in event_links:
             try:
                 href = link.get_attribute('href')
@@ -218,7 +216,7 @@ def scrape_fightodds():
                 href_lower = href.lower()
                 if any(keyword in text_lower or keyword in href_lower for keyword in TARGET_PROMOTION_KEYWORDS):
                     target_event_links.append((text, href))
-                    print(f"Found target event: {text} ({href})")
+                    print(text)
             except Exception as e:
                 print(f"Error processing event link: {e}")
                 continue
@@ -248,9 +246,6 @@ def scrape_fightodds():
                         event_data = parse_odds_table(event_html, event_name)
                         if not event_data.empty:
                             all_data.append(event_data)
-                        else:
-                            # Log that we found the event but it has no odds data yet (common for LFA)
-                            print(f"Event {event_name} found but has no odds data yet")
                     except Exception as e:
                         print(f"Error scraping event {event_name}: {e}")
                         import traceback
