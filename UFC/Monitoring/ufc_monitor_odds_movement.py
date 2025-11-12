@@ -143,31 +143,30 @@ def normalize_date_text_to_MMDD(date_text):
 
 
 def canonical_fight_id(file_path, event, fighter, source='fightodds', matchup=None):
-    """Return canonical ID: fight_{YYYYMMDD}_{fighter_slug}.
-    Prefer date from event; if not present, fall back to date from filename.
+    """Return canonical ID based on event name and fighter.
+    Use event name (without date) + fighter to create stable IDs that don't change when dates are updated.
     """
     fighter_slug = slugify_fighter_for_id(fighter)
-    # try extract month/day from event and prefer that (MMDD)
-    date_text = extract_date_from_event(event) if event else None
-    date_token = None
-    if date_text:
-        date_token = normalize_date_text_to_MMDD(date_text)
-    # if no month/day from event, fall back to filename full date YYYYMMDD
-    if not date_token:
-        date_token = date_from_filename(file_path)
-    if not date_token:
-        date_token = 'unknown'
-    return f"fight_{date_token}_{fighter_slug}"
+    # Remove date from event name to get stable event identifier
+    event_name_clean = remove_date_from_event(event) if event else 'unknown'
+    # Create a slug from the clean event name
+    event_slug = re.sub(r'\s+', '_', normalize_text(event_name_clean))
+    event_slug = re.sub(r'[^a-zA-Z0-9_]', '', event_slug).lower()
+    if not event_slug:
+        event_slug = 'unknown'
+    return f"fight_{event_slug}_{fighter_slug}"
 
 def canonical_total_group_id(file_path, event, fighter1, fighter2):
-    date_text = extract_date_from_event(event) if event else None
-    date_token = normalize_date_text_to_MMDD(date_text) if date_text else None
-    if not date_token:
-        date_token = 'unknown'
+    # Use event name without date for stable IDs
+    event_name_clean = remove_date_from_event(event) if event else 'unknown'
+    event_slug = re.sub(r'\s+', '_', normalize_text(event_name_clean))
+    event_slug = re.sub(r'[^a-zA-Z0-9_]', '', event_slug).lower()
+    if not event_slug:
+        event_slug = 'unknown'
     fighter_tokens = '_'.join(filter(None, [slugify_fighter_for_id(fighter1), slugify_fighter_for_id(fighter2)]))
     if not fighter_tokens:
         fighter_tokens = 'unknown'
-    return f"total_{date_token}_{fighter_tokens}"
+    return f"total_{event_slug}_{fighter_tokens}"
 
 def canonical_total_id(file_path, event, totals_type, fighter1, fighter2):
     group_token = canonical_total_group_id(file_path, event, fighter1, fighter2)
@@ -178,16 +177,16 @@ def canonical_total_id(file_path, event, totals_type, fighter1, fighter2):
     return f"{group_token}_{totals_token}"
 
 def extract_total_core_id(total_id):
-    """Extract the core part of a total ID (fighters + totals_type) ignoring date format.
-    Handles both old format (total_YYYYMMDD_...) and new format (total_MMDD_...).
-    Returns: total_*_fighter1_fighter2_totals_type (with date part normalized)
+    """Extract the core part of a total ID (fighters + totals_type) ignoring event identifier.
+    Handles both old format (total_MMDD_...) and new format (total_eventname_...).
+    Returns: fighter1_fighter2_totals_type (without event/date prefix)
     """
     if not total_id:
         return None
     normalized = normalize_text(total_id)
-    # Match: total_<date>_<fighters>_<totals_type>
-    # Extract everything after the first date part
-    match = re.search(r'^total_\d+_(.+)$', normalized)
+    # Match: total_<event_or_date>_<fighters>_<totals_type>
+    # Extract everything after the first part (event identifier or date)
+    match = re.search(r'^total_[^_]+_(.+)$', normalized)
     if match:
         return match.group(1)
     return normalized
@@ -218,7 +217,7 @@ def is_valid_odds(value):
 def clean_fight_id_from_file(fight_id):
     """Normalize legacy fight IDs from file into a simplified token.
     This attempts to handle previous prefixes like 'fightodds_' and 'vsin_'
-    by converting them to the canonical 'fight_{date}_{fighter_slug}' style when possible.
+    and converts date-based IDs to event-based IDs when loading from file.
     """
     if not fight_id:
         return ''
@@ -389,18 +388,34 @@ def process_fightodds_new_fights(file_path, seen_fights):
 # VSIN processing removed — this script only processes fightodds files
 
 def clean_seen_fights_file():
-    """Clean all entries in seen_fights.txt file to remove leading numbers from fighter names."""
+    """Clean all entries in seen_fights.txt file to remove leading numbers from fighter names.
+    Also removes duplicate entries that differ only by date (e.g., fight_1114_fighter vs fight_1121_fighter).
+    """
     if not os.path.exists(seen_fights_file):
         return
     # Read and clean all entries
     cleaned_entries = set()
+    fighter_only_seen = {}  # Track fighters without date to detect duplicates
+    
     with open(seen_fights_file, 'r') as f:
         for line in f:
             normalized = normalize_text(line)
             if normalized:
                 cleaned = clean_fight_id_from_file(normalized)
-                cleaned_entries.add(cleaned)
-    # Write back cleaned entries
+                # Check if this is an old date-based ID (fight_MMDD_fighter)
+                date_match = re.match(r'^fight_(\d{4})_(.+)$', cleaned)
+                if date_match:
+                    # This is a date-based ID - extract just the fighter part
+                    fighter_part = date_match.group(2)
+                    # Track that we've seen this fighter
+                    if fighter_part not in fighter_only_seen:
+                        fighter_only_seen[fighter_part] = cleaned
+                    # Skip adding date-based IDs to cleaned_entries (they'll be removed)
+                else:
+                    # This is already an event-based ID, keep it
+                    cleaned_entries.add(cleaned)
+    
+    # Write back cleaned entries (only event-based IDs)
     os.makedirs(os.path.dirname(seen_fights_file), exist_ok=True)
     with open(seen_fights_file, 'w') as f:
         for entry in sorted(cleaned_entries):
@@ -410,15 +425,30 @@ def clean_seen_fights_file():
 clean_seen_fights_file()
 
 def clean_seen_totals_file():
+    """Clean all entries in seen_totals.txt file, removing duplicates that differ only by date."""
     if not os.path.exists(seen_totals_file):
         return
     cleaned_entries = set()
+    total_cores_seen = {}  # Track core IDs to detect duplicates
+    
     with open(seen_totals_file, 'r') as f:
         for line in f:
             normalized = normalize_text(line)
             if normalized:
                 cleaned = clean_fight_id_from_file(normalized)
-                cleaned_entries.add(cleaned)
+                # Check if this is an old date-based ID (total_MMDD_...)
+                date_match = re.match(r'^total_(\\d{4})_(.+)$', cleaned)
+                if date_match:
+                    # This is a date-based ID - extract just the core part (fighters + totals_type)
+                    core_part = date_match.group(2)
+                    # Track that we've seen this total
+                    if core_part not in total_cores_seen:
+                        total_cores_seen[core_part] = cleaned
+                    # Skip adding date-based IDs to cleaned_entries (they'll be removed)
+                else:
+                    # This is already an event-based ID, keep it
+                    cleaned_entries.add(cleaned)
+    
     os.makedirs(os.path.dirname(seen_totals_file), exist_ok=True)
     with open(seen_totals_file, 'w') as f:
         for entry in sorted(cleaned_entries):
