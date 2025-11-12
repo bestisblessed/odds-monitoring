@@ -123,7 +123,11 @@ def parse_odds_table(html_content, event_name="Unknown Event"):
             
             for tr in tbody.find_all('tr'):
                 fighter_data = {'Event': event_name}
-                fighter_link = tr.find('a')
+                first_cell = tr.find('td')
+                if not first_cell:
+                    continue
+                
+                fighter_link = first_cell.find('a')
                 
                 # Detect fighter rows and maintain the current pairing context
                 if fighter_link:
@@ -133,8 +137,12 @@ def parse_odds_table(html_content, event_name="Unknown Event"):
                     
                     # Update pairing context
                     if not last_fighter_name:
+                        # First fighter in a pair - store it and clear previous pair
                         last_fighter_name = fighter_name
+                        current_fighter_1 = None
+                        current_fighter_2 = None
                     else:
+                        # Second fighter in a pair - set the pair
                         current_fighter_1 = last_fighter_name
                         current_fighter_2 = fighter_name
                         last_fighter_name = None
