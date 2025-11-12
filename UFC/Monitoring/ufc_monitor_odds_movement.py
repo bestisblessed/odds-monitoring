@@ -13,6 +13,7 @@ PUSHOVER_API_TOKEN = "a75tq5kqignpk3p8ndgp66bske3bsi"
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 seen_fights_file = os.path.join(script_dir, 'data', 'seen_fights.txt')
+seen_totals_file = os.path.join(script_dir, 'data', 'seen_totals.txt')
 data_directory = os.path.join(script_dir, '..', 'Scraping', 'data')
 TARGET_PROMOTIONS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "rizin", "bcf", "brave", "uaew", "ksw")
 
@@ -155,6 +156,22 @@ def canonical_fight_id(file_path, event, fighter, source='fightodds', matchup=No
         date_token = 'unknown'
     return f"fight_{date_token}_{fighter_slug}"
 
+def canonical_total_id(file_path, event, totals_type, fighter1, fighter2):
+    date_text = extract_date_from_event(event) if event else None
+    date_token = normalize_date_text_to_MMDD(date_text) if date_text else None
+    if not date_token:
+        date_token = date_from_filename(file_path)
+    if not date_token:
+        date_token = 'unknown'
+    fighter_tokens = '_'.join(filter(None, [slugify_fighter_for_id(fighter1), slugify_fighter_for_id(fighter2)]))
+    if not fighter_tokens:
+        fighter_tokens = 'unknown'
+    totals_token = normalize_text(totals_type).lower().replace(' ', '_')
+    totals_token = re.sub(r'[^a-z0-9_]', '', totals_token)
+    if not totals_token:
+        totals_token = 'total'
+    return f"total_{date_token}_{fighter_tokens}_{totals_token}"
+
 def is_valid_odds(value):
     if not value:
         return False
@@ -193,12 +210,32 @@ def load_seen_fights():
                     seen.add(cleaned)
     return seen
 
+def load_seen_totals():
+    if not os.path.exists(seen_totals_file):
+        return set()
+    seen = set()
+    with open(seen_totals_file, 'r') as f:
+        for line in f:
+            normalized = normalize_text(line)
+            if normalized:
+                cleaned = clean_fight_id_from_file(normalized)
+                if cleaned:
+                    seen.add(cleaned)
+    return seen
+
 def save_seen_fight(fight_id):
     os.makedirs(os.path.dirname(seen_fights_file), exist_ok=True)
     # Assume fight_id provided by processors is already canonical; normalize for safety
     normalized_id = normalize_text(fight_id)
     normalized_id = clean_fight_id_from_file(normalized_id)
     with open(seen_fights_file, 'a') as f:
+        f.write(normalized_id + '\n')
+
+def save_seen_total(total_id):
+    os.makedirs(os.path.dirname(seen_totals_file), exist_ok=True)
+    normalized_id = normalize_text(total_id)
+    normalized_id = clean_fight_id_from_file(normalized_id)
+    with open(seen_totals_file, 'a') as f:
         f.write(normalized_id + '\n')
 
 def send_pushover_notification(title, message):
@@ -231,6 +268,15 @@ def get_latest_fightodds_file():
     if not os.path.exists(data_directory):
         return None
     files = [f for f in os.listdir(data_directory) if re.match(r'ufc_odds_fightoddsio_\d{8}_\d{4}\.csv', f)]
+    if not files:
+        return None
+    files.sort(key=lambda x: re.findall(r'(\d{8}_\d{4})', x)[0], reverse=True)
+    return os.path.join(data_directory, files[0]) if files else None
+
+def get_latest_totals_file():
+    if not os.path.exists(data_directory):
+        return None
+    files = [f for f in os.listdir(data_directory) if re.match(r'ufc_totals_fightoddsio_\d{8}_\d{4}\.csv', f)]
     if not files:
         return None
     files.sort(key=lambda x: re.findall(r'(\d{8}_\d{4})', x)[0], reverse=True)
@@ -326,17 +372,79 @@ def clean_seen_fights_file():
 # Clean the file on startup to ensure all existing entries are cleaned
 clean_seen_fights_file()
 
+def clean_seen_totals_file():
+    if not os.path.exists(seen_totals_file):
+        return
+    cleaned_entries = set()
+    with open(seen_totals_file, 'r') as f:
+        for line in f:
+            normalized = normalize_text(line)
+            if normalized:
+                cleaned = clean_fight_id_from_file(normalized)
+                cleaned_entries.add(cleaned)
+    os.makedirs(os.path.dirname(seen_totals_file), exist_ok=True)
+    with open(seen_totals_file, 'w') as f:
+        for entry in sorted(cleaned_entries):
+            f.write(entry + '\n')
+
+clean_seen_totals_file()
+
+def process_fightodds_new_totals(file_path, seen_totals):
+    if not file_path or not os.path.exists(file_path):
+        return []
+    new_totals = []
+    with open(file_path, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            totals_type = normalize_text(row.get('Totals_Type', ''))
+            event = normalize_text(row.get('Event', ''))
+            if not totals_type or not event or not is_target_event(event):
+                continue
+            fighter1 = clean_fighter_name(row.get('Fighter1', ''))
+            fighter2 = clean_fighter_name(row.get('Fighter2', ''))
+            total_id = canonical_total_id(file_path, event, totals_type, fighter1, fighter2)
+            normalized_total_id = clean_fight_id_from_file(normalize_text(total_id))
+            if normalized_total_id in seen_totals:
+                continue
+            first_odds = None
+            first_book = None
+            for key, value in row.items():
+                if key in ['Fighter1', 'Fighter2', 'Totals_Type', 'Event']:
+                    continue
+                if is_valid_odds(value):
+                    first_odds = str(value).strip()
+                    first_book = key
+                    break
+            if first_odds:
+                matchup = None
+                if fighter1 and fighter2:
+                    matchup = f"{fighter1} vs {fighter2}"
+                elif fighter1 or fighter2:
+                    matchup = fighter1 or fighter2
+                new_totals.append({
+                    'total_id': normalized_total_id,
+                    'event': event,
+                    'matchup': matchup,
+                    'totals_type': totals_type,
+                    'odds': f"{first_book}: {first_odds}"
+                })
+    return new_totals
+
 seen_fights = load_seen_fights()
+seen_totals = load_seen_totals()
 new_fights = []
+new_totals = []
 
 latest_fightodds = get_latest_fightodds_file()
 if latest_fightodds:
     new_fights.extend(process_fightodds_new_fights(latest_fightodds, seen_fights))
 
-# VSIN processing removed: only process fightodds files for opening odds notifications
+latest_totals = get_latest_totals_file()
+if latest_totals:
+    new_totals.extend(process_fightodds_new_totals(latest_totals, seen_totals))
 
-if not new_fights:
-    print("No new fights detected")
+if not new_fights and not new_totals:
+    print("No new odds detected")
     exit(0)
 
 for fight in new_fights:
@@ -356,5 +464,27 @@ for fight in new_fights:
     else:
         print(f"Failed to send notification for: {fight['title']}")
 
-print(f"Processed {len(new_fights)} new fights")
+for total in new_totals:
+    title = "🚨 TOTALS OPENING ODDS 🚨"
+    
+    parts = [""]
+    if total.get('event'):
+        event_name = remove_date_from_event(total['event'])
+        parts.append(f"📅  {event_name}")
+    if total.get('matchup'):
+        parts.append(f"🥊  {total['matchup']}")
+    parts.append(f"📈  {total['totals_type']}")
+    parts.append(f"💵  {total['odds']}")
+    message = "\n".join(parts)
+    
+    if send_pushover_notification(title, message):
+        save_seen_total(total['total_id'])
+        print(f"Sent totals notification for: {total['totals_type']} - {total['odds']}")
+    else:
+        print(f"Failed to send totals notification for: {total['totals_type']}")
+
+if new_fights:
+    print(f"Processed {len(new_fights)} new fights")
+if new_totals:
+    print(f"Processed {len(new_totals)} new totals")
 
