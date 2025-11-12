@@ -322,37 +322,38 @@ def process_fightodds_new_fights(file_path, seen_fights):
     
     # Process each event, pairing consecutive fighters
     for event, fighters_list in events.items():
-        for idx, (i, fighter, row) in enumerate(fighters_list):
-            opponent = None
-            # Pair consecutive fighters within the same event
-            # If even index, opponent is next fighter (odd index)
-            # If odd index, opponent is previous fighter (even index)
-            if idx % 2 == 0 and idx + 1 < len(fighters_list):
-                opponent = fighters_list[idx + 1][1]
-            elif idx % 2 == 1 and idx > 0:
-                opponent = fighters_list[idx - 1][1]
-            
-            # build a canonical fight id using the file date as fallback
-            fight_id = canonical_fight_id(file_path, event, fighter, source='fightodds')
-            normalized_fight_id = normalize_text(fight_id)
-            if normalized_fight_id not in seen_fights:
+        fighters_list.sort(key=lambda x: x[0])
+        index = 0
+        while index < len(fighters_list):
+            pair_entries = fighters_list[index:index + 2]
+            index += 2
+            fighters_info = []
+            new_ids = []
+            for _, fighter, row in pair_entries:
+                fight_id = canonical_fight_id(file_path, event, fighter, source='fightodds')
+                normalized_fight_id = normalize_text(fight_id)
                 first_odds = None
                 first_book = None
                 for key, value in row.items():
                     if key not in ['Fighters', 'Event'] and is_valid_odds(value):
-                        if first_odds is None:
-                            first_odds = str(value).strip()
-                            first_book = key
-                            break
-                
-                if first_odds:
-                    new_fights.append({
-                        'fight_id': normalized_fight_id,
-                        'title': fighter,
-                        'opponent': opponent,
-                        'event': event,
-                        'odds': f"{first_book}: {first_odds}"
-                    })
+                        first_odds = str(value).strip()
+                        first_book = key
+                        break
+                if not first_odds:
+                    continue
+                fighters_info.append({
+                    'name': fighter,
+                    'book': first_book,
+                    'odds': first_odds
+                })
+                if normalized_fight_id not in seen_fights:
+                    new_ids.append(normalized_fight_id)
+            if fighters_info and new_ids:
+                new_fights.append({
+                    'event': event,
+                    'fighters': fighters_info,
+                    'fight_ids': new_ids
+                })
     
     return new_fights
 
@@ -469,20 +470,24 @@ if not new_fights and not new_totals:
 
 for fight in new_fights:
     title = "🚨 OPENING ODDS 🚨"
-    
+
     parts = [""]
     if fight.get('event'):
         event_name = remove_date_from_event(fight['event'])
         parts.append(f"📅  {event_name}")
-    parts.append(f"🥊  {fight['title']}")
-    parts.append(f"💵  {fight['odds']}")
+    for fighter in fight['fighters']:
+        parts.append(f"💵  {fighter['name']} - {fighter['book']}: {fighter['odds']}")
     message = "\n".join(parts)
-    
+
     if send_pushover_notification(title, message):
-        save_seen_fight(fight['fight_id'])
-        print(f"Sent notification for: {fight['title']} - {fight['odds']}")
+        for fight_id in fight['fight_ids']:
+            save_seen_fight(fight_id)
+            seen_fights.add(fight_id)
+        fighter_names = ", ".join(fighter['name'] for fighter in fight['fighters'])
+        print(f"Sent notification for fighters: {fighter_names}")
     else:
-        print(f"Failed to send notification for: {fight['title']}")
+        fighter_names = ", ".join(fighter['name'] for fighter in fight['fighters'])
+        print(f"Failed to send notification for fighters: {fighter_names}")
 
 for total_group in new_totals:
     title = "🚨 TOTALS OPENING ODDS 🚨"
