@@ -327,69 +327,72 @@ def process_fightodds_new_fights(file_path, seen_fights):
         reader = csv.DictReader(f)
         rows = list(reader)
     
-    events = {}
+    grouped_fights = {}
     for index_order, row in enumerate(rows):
         fighter_raw = row.get('Fighters', '')
         fighter = clean_fighter_name(fighter_raw)
         event = normalize_text(row.get('Event', ''))
         if not fighter or not event or not is_target_event(event):
             continue
-        if event not in events:
-            events[event] = []
-        events[event].append((index_order, fighter, row))
-    
-    grouped_fights = {}
-    event_state = {}
-    for event, fighters_list in events.items():
-        fighters_list.sort(key=lambda x: x[0])
-        event_state[event] = {'pending': None}
-        for order_index, fighter, row in fighters_list:
-            fight_id = canonical_fight_id(file_path, event, fighter, source='fightodds')
-            normalized_fight_id = normalize_text(fight_id)
-            first_odds = None
-            first_book = None
-            for key, value in row.items():
-                if key in ['Fighters', 'Event']:
-                    continue
-                if is_valid_odds(value):
-                    first_odds = str(value).strip()
-                    first_book = key
-                    break
-            if not first_odds:
+
+        fighter1 = clean_fighter_name(row.get('Fighter1', ''))
+        fighter2 = clean_fighter_name(row.get('Fighter2', ''))
+        pair_names = []
+        for name in [fighter1, fighter2]:
+            if name and name not in pair_names:
+                pair_names.append(name)
+        if fighter and fighter not in pair_names:
+            pair_names.append(fighter)
+        unique_names = []
+        for name in pair_names:
+            if name and name not in unique_names:
+                unique_names.append(name)
+        if len(unique_names) < 2:
+            continue
+        pair_sorted = sorted(unique_names)[:2]
+
+        fight_id = canonical_fight_id(file_path, event, fighter, source='fightodds')
+        normalized_fight_id = normalize_text(fight_id)
+
+        first_odds = None
+        first_book = None
+        for key, value in row.items():
+            if key in ['Fighters', 'Fighter1', 'Fighter2', 'Event']:
                 continue
-            fighter_entry = {
+            if is_valid_odds(value):
+                first_odds = str(value).strip()
+                first_book = key
+                break
+        if not first_odds:
+            continue
+
+        group_id_raw = canonical_moneyline_group_id(file_path, event, pair_sorted[0], pair_sorted[1])
+        group_id = clean_fight_id_from_file(normalize_text(group_id_raw))
+        if group_id not in grouped_fights:
+            grouped_fights[group_id] = {
+                'event': event,
+                'pair': pair_sorted,
+                'fighters': {}
+            }
+        group_entry = grouped_fights[group_id]
+        fighter_bucket = group_entry['fighters']
+        if fighter not in fighter_bucket or index_order < fighter_bucket[fighter]['order']:
+            fighter_bucket[fighter] = {
                 'name': fighter,
                 'book': first_book,
                 'odds': first_odds,
                 'fight_id': normalized_fight_id,
-                'order': order_index
+                'order': index_order
             }
-            pending_entry = event_state[event]['pending']
-            if pending_entry:
-                if pending_entry['fight_id'] == fighter_entry['fight_id']:
-                    event_state[event]['pending'] = fighter_entry
-                    continue
-                group_id_raw = canonical_moneyline_group_id(file_path, event, pending_entry['name'], fighter_entry['name'])
-                group_id = clean_fight_id_from_file(normalize_text(group_id_raw))
-                if group_id not in grouped_fights:
-                    grouped_fights[group_id] = {
-                        'event': event,
-                        'fighters': []
-                    }
-                group_entry = grouped_fights[group_id]
-                for entry in sorted([pending_entry, fighter_entry], key=lambda e: e['order']):
-                    if not any(existing['fight_id'] == entry['fight_id'] for existing in group_entry['fighters']):
-                        group_entry['fighters'].append(entry)
-                event_state[event]['pending'] = None
-            else:
-                event_state[event]['pending'] = fighter_entry
-    
+
     new_fights = []
     for group in grouped_fights.values():
-        fighters = group['fighters']
-        if not fighters:
+        fighters_map = group['fighters']
+        if not fighters_map:
             continue
-        fighters.sort(key=lambda e: e['order'])
+        fighters = sorted(fighters_map.values(), key=lambda e: e['order'])
+        if len(fighters) < 2:
+            continue
         new_ids = [fighter['fight_id'] for fighter in fighters if fighter['fight_id'] not in seen_fights]
         if not new_ids:
             continue

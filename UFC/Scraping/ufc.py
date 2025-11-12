@@ -105,6 +105,7 @@ def parse_odds_table(html_content, event_name="Unknown Event"):
                 if link and link.get('href'):
                     sportsbook = link['href'].split('/')[-1]
                     all_sportsbooks.add(sportsbook)
+    pending_entry = None
     for table in tables:
         sportsbooks = []
         thead = table.find('thead')
@@ -120,7 +121,10 @@ def parse_odds_table(html_content, event_name="Unknown Event"):
                 fighter_data = {'Event': event_name}
                 fighter_link = tr.find('a')
                 if fighter_link:
-                    fighter_data['Fighters'] = fighter_link.text.strip()
+                    fighter_name = fighter_link.text.strip()
+                    fighter_data['Fighters'] = fighter_name
+                    fighter_data['Fighter1'] = ''
+                    fighter_data['Fighter2'] = ''
                 else:
                     continue
                 odds_cells = tr.find_all('td')[1:-1]
@@ -146,18 +150,37 @@ def parse_odds_table(html_content, event_name="Unknown Event"):
                                             break
                             if odds_span:
                                 fighter_data[sportsbook] = odds_span.text.strip()
-                all_fighters_data.append(fighter_data)
+                if pending_entry:
+                    opponent_name = fighter_name
+                    fighter_data['Fighter1'] = pending_entry['Fighters']
+                    fighter_data['Fighter2'] = opponent_name
+                    pending_entry['Fighter1'] = pending_entry['Fighters']
+                    pending_entry['Fighter2'] = opponent_name
+                    all_fighters_data.append(pending_entry)
+                    all_fighters_data.append(fighter_data)
+                    pending_entry = None
+                else:
+                    pending_entry = fighter_data
+                continue
+    if pending_entry:
+        pending_entry['Fighter1'] = pending_entry['Fighters']
+        pending_entry['Fighter2'] = ''
+        all_fighters_data.append(pending_entry)
     if all_fighters_data:
         df = pd.DataFrame(all_fighters_data)
         for sportsbook in all_sportsbooks:
             if sportsbook not in df.columns:
                 df[sportsbook] = ''
-        first_cols = ['Event', 'Fighters']
+        if 'Fighter1' not in df.columns:
+            df['Fighter1'] = ''
+        if 'Fighter2' not in df.columns:
+            df['Fighter2'] = ''
+        first_cols = ['Event', 'Fighter1', 'Fighter2', 'Fighters']
         other_cols = [col for col in df.columns if col not in first_cols]
         df = df[first_cols + other_cols]
         return df
     else:
-        columns = ['Event', 'Fighters'] + list(all_sportsbooks)
+        columns = ['Event', 'Fighter1', 'Fighter2', 'Fighters'] + list(all_sportsbooks)
         return pd.DataFrame(columns=columns)
 
 TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "rizin", "brave", "ksw", "uaew")
