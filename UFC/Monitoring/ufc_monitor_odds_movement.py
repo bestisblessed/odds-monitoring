@@ -157,6 +157,21 @@ def canonical_fight_id(file_path, event, fighter, source='fightodds', matchup=No
         date_token = 'unknown'
     return f"fight_{date_token}_{fighter_slug}"
 
+def canonical_matchup_group_id(file_path, event, fighter1, fighter2):
+    """Create a group ID for a matchup (fight) that combines both fighters."""
+    date_text = extract_date_from_event(event) if event else None
+    date_token = normalize_date_text_to_MMDD(date_text) if date_text else None
+    if not date_token:
+        date_token = date_from_filename(file_path)
+    if not date_token:
+        date_token = 'unknown'
+    # Sort fighter names alphabetically to ensure consistent grouping
+    fighters = sorted([slugify_fighter_for_id(fighter1), slugify_fighter_for_id(fighter2)])
+    fighter_tokens = '_'.join(filter(None, fighters))
+    if not fighter_tokens:
+        fighter_tokens = 'unknown'
+    return f"matchup_{date_token}_{fighter_tokens}"
+
 def canonical_total_group_id(file_path, event, fighter1, fighter2):
     date_text = extract_date_from_event(event) if event else None
     date_token = normalize_date_text_to_MMDD(date_text) if date_text else None
@@ -336,51 +351,53 @@ def process_fightodds_new_fights(file_path, seen_fights):
         reader = csv.DictReader(f)
         rows = list(reader)
     
-    # Group fighters by event
-    events = {}
-    for i, row in enumerate(rows):
+    for row in rows:
         fighter_raw = row.get('Fighters', '')
         fighter = clean_fighter_name(fighter_raw)
         event = normalize_text(row.get('Event', ''))
         if not fighter or not event or not is_target_event(event):
             continue
-        if event not in events:
-            events[event] = []
-        events[event].append((i, fighter, row))
-    
-    # Process each event, pairing consecutive fighters
-    for event, fighters_list in events.items():
-        for idx, (i, fighter, row) in enumerate(fighters_list):
-            opponent = None
-            # Pair consecutive fighters within the same event
-            # If even index, opponent is next fighter (odd index)
-            # If odd index, opponent is previous fighter (even index)
-            if idx % 2 == 0 and idx + 1 < len(fighters_list):
-                opponent = fighters_list[idx + 1][1]
-            elif idx % 2 == 1 and idx > 0:
-                opponent = fighters_list[idx - 1][1]
+        
+        # Use Fighter1/Fighter2 columns if available (more robust)
+        fighter1 = clean_fighter_name(row.get('Fighter1', ''))
+        fighter2 = clean_fighter_name(row.get('Fighter2', ''))
+        
+        # Determine opponent from Fighter1/Fighter2 columns
+        opponent = None
+        if fighter1 and fighter2:
+            # This fighter is part of a matchup
+            if fighter == fighter1:
+                opponent = fighter2
+            elif fighter == fighter2:
+                opponent = fighter1
+            else:
+                # Fighter doesn't match Fighter1 or Fighter2, fallback to pairing logic
+                opponent = fighter2 if fighter == fighter1 else (fighter1 if fighter == fighter2 else None)
+        
+        # build a canonical fight id using the file date as fallback
+        fight_id = canonical_fight_id(file_path, event, fighter, source='fightodds')
+        normalized_fight_id = normalize_text(fight_id)
+        if normalized_fight_id not in seen_fights:
+            first_odds = None
+            first_book = None
+            for key, value in row.items():
+                if key not in ['Fighters', 'Event', 'Fighter1', 'Fighter2'] and is_valid_odds(value):
+                    if first_odds is None:
+                        first_odds = str(value).strip()
+                        first_book = key
+                        break
             
-            # build a canonical fight id using the file date as fallback
-            fight_id = canonical_fight_id(file_path, event, fighter, source='fightodds')
-            normalized_fight_id = normalize_text(fight_id)
-            if normalized_fight_id not in seen_fights:
-                first_odds = None
-                first_book = None
-                for key, value in row.items():
-                    if key not in ['Fighters', 'Event'] and is_valid_odds(value):
-                        if first_odds is None:
-                            first_odds = str(value).strip()
-                            first_book = key
-                            break
-                
-                if first_odds:
-                    new_fights.append({
-                        'fight_id': normalized_fight_id,
-                        'title': fighter,
-                        'opponent': opponent,
-                        'event': event,
-                        'odds': f"{first_book}: {first_odds}"
-                    })
+            if first_odds:
+                new_fights.append({
+                    'fight_id': normalized_fight_id,
+                    'title': fighter,
+                    'opponent': opponent,
+                    'fighter1': fighter1,
+                    'fighter2': fighter2,
+                    'event': event,
+                    'odds': f"{first_book}: {first_odds}",
+                    'file_path': file_path
+                })
     
     return new_fights
 
@@ -495,22 +512,60 @@ if not new_fights and not new_totals:
     print("No new odds detected")
     exit(0)
 
+# Group fights by matchup
+matchup_groups = {}
 for fight in new_fights:
+    fighter1_from_csv = fight.get('fighter1')
+    fighter2_from_csv = fight.get('fighter2')
+    file_path = fight.get('file_path')
+    
+    # Use Fighter1/Fighter2 from CSV if available (more robust)
+    if fighter1_from_csv and fighter2_from_csv:
+        matchup_key = canonical_matchup_group_id(file_path, fight['event'], fighter1_from_csv, fighter2_from_csv)
+    else:
+        # Fallback to pairing logic if Fighter1/Fighter2 not available
+        fighter1 = fight['title']
+        fighter2 = fight.get('opponent')
+        if not fighter2:
+            # If no opponent, treat as individual fight
+            matchup_key = f"{fight['event']}_{fighter1}"
+        else:
+            matchup_key = canonical_matchup_group_id(file_path, fight['event'], fighter1, fighter2)
+    
+    if matchup_key not in matchup_groups:
+        matchup_groups[matchup_key] = {
+            'event': fight['event'],
+            'fighters': []
+        }
+    
+    matchup_groups[matchup_key]['fighters'].append({
+        'name': fighter1,
+        'odds': fight['odds'],
+        'fight_id': fight['fight_id']
+    })
+
+# Send combined notifications for each matchup
+for matchup_key, group in matchup_groups.items():
     title = "🚨 OPENING ODDS 🚨"
     
     parts = [""]
-    if fight.get('event'):
-        event_name = remove_date_from_event(fight['event'])
+    if group.get('event'):
+        event_name = remove_date_from_event(group['event'])
         parts.append(f"📅  {event_name}")
-    parts.append(f"🥊  {fight['title']}")
-    parts.append(f"💵  {fight['odds']}")
+    
+    for fighter in group['fighters']:
+        parts.append(f"💵  {fighter['name']} - {fighter['odds']}")
+    
     message = "\n".join(parts)
     
     if send_pushover_notification(title, message):
-        save_seen_fight(fight['fight_id'])
-        print(f"Sent notification for: {fight['title']} - {fight['odds']}")
+        for fighter in group['fighters']:
+            save_seen_fight(fighter['fight_id'])
+        fighter_names = " vs ".join([f['name'] for f in group['fighters']])
+        print(f"Sent notification for: {fighter_names}")
     else:
-        print(f"Failed to send notification for: {fight['title']}")
+        fighter_names = " vs ".join([f['name'] for f in group['fighters']])
+        print(f"Failed to send notification for: {fighter_names}")
 
 for total_group in new_totals:
     title = "🚨 TOTALS OPENING ODDS 🚨"

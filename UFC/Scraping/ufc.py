@@ -116,48 +116,97 @@ def parse_odds_table(html_content, event_name="Unknown Event"):
                     sportsbooks.append(sportsbook)
         tbody = table.find('tbody')
         if tbody:
+            # Track the current fight pairing as we traverse rows
+            last_fighter_name = None
+            last_fighter_row_index = None
+            
             for tr in tbody.find_all('tr'):
                 fighter_data = {'Event': event_name}
-                fighter_link = tr.find('a')
-                if fighter_link:
-                    fighter_data['Fighters'] = fighter_link.text.strip()
-                else:
+                first_cell = tr.find('td')
+                if not first_cell:
                     continue
-                odds_cells = tr.find_all('td')[1:-1]
-                for i, td in enumerate(odds_cells):
-                    if i < len(sportsbooks):
-                        sportsbook = sportsbooks[i]
-                        button = td.find('button')
-                        if button:
-                            # Try to find odds span - multiple patterns possible
-                            odds_span = None
-                            # Pattern 1: jss\d+ false (UFC/PFL style)
-                            odds_span = button.find('span', {'class': re.compile('jss\\d+ false')})
-                            # Pattern 2: jss\d+ (ONE Championship style) - look for span with jss class that contains odds
-                            if not odds_span:
-                                all_spans = button.find_all('span')
-                                for span in all_spans:
-                                    span_classes = span.get('class', [])
-                                    if span_classes and any(re.match(r'jss\d+', str(c)) for c in span_classes):
-                                        text = span.text.strip()
-                                        # Check if it looks like odds (starts with + or - and has digits)
-                                        if text and re.match(r'^[+-]?\d+$', text):
-                                            odds_span = span
-                                            break
-                            if odds_span:
-                                fighter_data[sportsbook] = odds_span.text.strip()
-                all_fighters_data.append(fighter_data)
+                
+                fighter_link = first_cell.find('a')
+                
+                # Detect fighter rows and maintain the current pairing context
+                if fighter_link:
+                    fighter_name = fighter_link.text.strip()
+                    if not fighter_name:
+                        continue
+                    
+                    # Extract odds for this fighter first
+                    odds_cells = tr.find_all('td')[1:-1]
+                    for i, td in enumerate(odds_cells):
+                        if i < len(sportsbooks):
+                            sportsbook = sportsbooks[i]
+                            button = td.find('button')
+                            if button:
+                                # Try to find odds span - multiple patterns possible
+                                odds_span = None
+                                # Pattern 1: jss\d+ false (UFC/PFL style)
+                                odds_span = button.find('span', {'class': re.compile('jss\\d+ false')})
+                                # Pattern 2: jss\d+ (ONE Championship style) - look for span with jss class that contains odds
+                                if not odds_span:
+                                    all_spans = button.find_all('span')
+                                    for span in all_spans:
+                                        span_classes = span.get('class', [])
+                                        if span_classes and any(re.match(r'jss\d+', str(c)) for c in span_classes):
+                                            text = span.text.strip()
+                                            # Check if it looks like odds (starts with + or - and has digits)
+                                            if text and re.match(r'^[+-]?\d+$', text):
+                                                odds_span = span
+                                                break
+                                if odds_span:
+                                    fighter_data[sportsbook] = odds_span.text.strip()
+                    
+                    # Update pairing context
+                    if not last_fighter_name:
+                        # First fighter in a pair - store it for later pairing
+                        last_fighter_name = fighter_name
+                        fighter_data['Fighters'] = fighter_name
+                        fighter_data['Fighter1'] = ''
+                        fighter_data['Fighter2'] = ''
+                        # Add row and remember its index
+                        all_fighters_data.append(fighter_data.copy())
+                        last_fighter_row_index = len(all_fighters_data) - 1
+                    else:
+                        # Second fighter in a pair - set the pair for both fighters
+                        fighter1_name = last_fighter_name
+                        fighter2_name = fighter_name
+                        
+                        # Update the previous row (first fighter) with the pair
+                        if last_fighter_row_index is not None and last_fighter_row_index < len(all_fighters_data):
+                            all_fighters_data[last_fighter_row_index]['Fighter1'] = fighter1_name
+                            all_fighters_data[last_fighter_row_index]['Fighter2'] = fighter2_name
+                        
+                        # Add current row (second fighter) with the pair
+                        fighter_data['Fighters'] = fighter_name
+                        fighter_data['Fighter1'] = fighter1_name
+                        fighter_data['Fighter2'] = fighter2_name
+                        all_fighters_data.append(fighter_data.copy())
+                        
+                        # Reset for next pair
+                        last_fighter_name = None
+                        last_fighter_row_index = None
+                else:
+                    # Not a fighter row, skip
+                    continue
     if all_fighters_data:
         df = pd.DataFrame(all_fighters_data)
         for sportsbook in all_sportsbooks:
             if sportsbook not in df.columns:
                 df[sportsbook] = ''
-        first_cols = ['Event', 'Fighters']
+        # Ensure fighter columns exist even if some rows had no pairing context
+        if 'Fighter1' not in df.columns:
+            df['Fighter1'] = ''
+        if 'Fighter2' not in df.columns:
+            df['Fighter2'] = ''
+        first_cols = ['Event', 'Fighters', 'Fighter1', 'Fighter2']
         other_cols = [col for col in df.columns if col not in first_cols]
         df = df[first_cols + other_cols]
         return df
     else:
-        columns = ['Event', 'Fighters'] + list(all_sportsbooks)
+        columns = ['Event', 'Fighters', 'Fighter1', 'Fighter2'] + list(all_sportsbooks)
         return pd.DataFrame(columns=columns)
 
 TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "rizin", "brave", "ksw", "uaew")
