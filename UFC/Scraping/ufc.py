@@ -116,13 +116,32 @@ def parse_odds_table(html_content, event_name="Unknown Event"):
                     sportsbooks.append(sportsbook)
         tbody = table.find('tbody')
         if tbody:
+            # Track the current fight pairing as we traverse rows
+            last_fighter_name = None
+            current_fighter_1 = None
+            current_fighter_2 = None
+            
             for tr in tbody.find_all('tr'):
                 fighter_data = {'Event': event_name}
-                fighter_link = tr.find('a')
-                if fighter_link:
-                    fighter_data['Fighters'] = fighter_link.text.strip()
+                fighter_link = tr.find('a', href=True)
+                
+                # Detect fighter rows and maintain the current pairing context
+                if fighter_link and '/fighters/' in fighter_link.get('href', ''):
+                    fighter_name = fighter_link.text.strip()
+                    if not last_fighter_name:
+                        last_fighter_name = fighter_name
+                    else:
+                        current_fighter_1 = last_fighter_name
+                        current_fighter_2 = fighter_name
+                        last_fighter_name = None
+                    
+                    fighter_data['Fighters'] = fighter_name
+                    fighter_data['Fighter1'] = current_fighter_1 or ''
+                    fighter_data['Fighter2'] = current_fighter_2 or ''
                 else:
+                    # Not a fighter row, skip
                     continue
+                
                 odds_cells = tr.find_all('td')[1:-1]
                 for i, td in enumerate(odds_cells):
                     if i < len(sportsbooks):
@@ -152,12 +171,17 @@ def parse_odds_table(html_content, event_name="Unknown Event"):
         for sportsbook in all_sportsbooks:
             if sportsbook not in df.columns:
                 df[sportsbook] = ''
-        first_cols = ['Event', 'Fighters']
+        # Ensure fighter columns exist even if some rows had no pairing context
+        if 'Fighter1' not in df.columns:
+            df['Fighter1'] = ''
+        if 'Fighter2' not in df.columns:
+            df['Fighter2'] = ''
+        first_cols = ['Event', 'Fighters', 'Fighter1', 'Fighter2']
         other_cols = [col for col in df.columns if col not in first_cols]
         df = df[first_cols + other_cols]
         return df
     else:
-        columns = ['Event', 'Fighters'] + list(all_sportsbooks)
+        columns = ['Event', 'Fighters', 'Fighter1', 'Fighter2'] + list(all_sportsbooks)
         return pd.DataFrame(columns=columns)
 
 TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "rizin", "brave", "ksw", "uaew")
