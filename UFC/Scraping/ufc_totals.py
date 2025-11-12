@@ -52,28 +52,23 @@ def register_driver_cleanup(driver):
             pass
     atexit.register(_cleanup)
 
+# in setup_driver() of ufc_totals.py
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+
 def setup_driver():
-    chromedriver_path = "/usr/bin/chromedriver"
-    if not os.path.exists(chromedriver_path):
-        chromedriver_path = "/opt/homebrew/bin/chromedriver"
     chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--user-data-dir=/tmp/chrome-temp")
+    chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
-    # chrome_options.add_argument("--disable-images")
-    # chrome_options.add_argument("--disable-javascript")  # We'll enable it selectively if needed
     chrome_options.add_argument("--disable-extensions")
-    # chrome_options.add_argument("--disable-plugins")
-    chrome_options.add_experimental_option("prefs", {
-        "profile.default_content_settings.popups": 0,
-        "download.default_directory": "/tmp",
-        "download.prompt_for_download": False
-    })
-    service = Service(chromedriver_path)
+    chrome_options.add_argument("--user-data-dir=/tmp/chrome-temp")
+    chrome_options.binary_location = "/usr/bin/chromium"       # Raspberry Pi chromium
+    service = Service(executable_path="/usr/bin/chromedriver") # Raspberry Pi chromedriver
     driver = webdriver.Chrome(service=service, options=chrome_options)
-    register_driver_cleanup(driver)
+    driver.set_page_load_timeout(60)
     return driver
 
 def parse_totals_table(html_content, event_name="Unknown Event"):
