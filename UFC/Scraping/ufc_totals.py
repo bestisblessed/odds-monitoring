@@ -222,7 +222,7 @@ def parse_totals_table(html_content, event_name="Unknown Event"):
         columns = ['Fighter1', 'Fighter2', 'Totals_Type'] + list(all_sportsbooks) + ['Event']
         return pd.DataFrame(columns=columns)
 
-TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "rizin", "brave", "ksw", "uaew")
+TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage-warriors", "rizin", "brave", "ksw", "uaew", "uae-warriors")
 
 def scrape_fightodds_totals():
     driver = setup_driver()

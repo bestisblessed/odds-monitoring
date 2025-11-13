@@ -1,4 +1,4 @@
-from datadog import initialize, statsd
+# from datadog import initialize, statsd
 import selenium
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -18,7 +18,7 @@ import re
 import time
 
 # --- Datadog setup: no API key needed, agent is local ---
-#initialize(statsd_host="localhost", statsd_port=8125)
+# initialize(statsd_host="localhost", statsd_port=8125)
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 vsin_failed = False
@@ -160,7 +160,7 @@ def parse_odds_table(html_content, event_name="Unknown Event"):
         columns = ['Event', 'Fighters'] + list(all_sportsbooks)
         return pd.DataFrame(columns=columns)
 
-TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "rizin", "brave", "ksw", "uaew")
+TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage-warriors", "rizin", "brave", "ksw", "uaew", "uae-warriors")
 
 
 def scrape_fightodds():

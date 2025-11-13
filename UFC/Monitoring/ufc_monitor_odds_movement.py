@@ -13,7 +13,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 seen_fights_file = os.path.join(script_dir, 'data', 'seen_fights.txt')
 seen_totals_file = os.path.join(script_dir, 'data', 'seen_totals.txt')
 data_directory = os.path.join(script_dir, '..', 'Scraping', 'data')
-TARGET_PROMOTIONS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "rizin", "bcf", "brave", "uaew", "ksw")
+TARGET_PROMOTIONS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage-warriors", "rizin", "bcf", "brave", "uaew", "uae-warriors", "ksw")
 
 def normalize_text(text):
     return re.sub(r'\s+', ' ', str(text).strip())
@@ -505,9 +505,8 @@ for fight in new_fights:
     parts = [""]
     if fight.get('event'):
         event_name = remove_date_from_event(fight['event'])
-        parts.append(f"📅  {event_name}")
-    parts.append(f"🥊  {fight['title']}")
-    parts.append(f"💵  {fight['odds']}")
+        parts.append(f"{event_name}")
+    parts.append(f"{fight['title']} | {fight['odds']}")
     message = "\n".join(parts)
     
     if send_pushover_notification(title, message):
@@ -524,9 +523,9 @@ for total_group in new_totals:
         event_name = remove_date_from_event(total_group['event'])
         parts.append(f"📅  {event_name}")
     if total_group.get('matchup'):
-        parts.append(f"🥊  {total_group['matchup']}")
+        parts.append(f"{total_group['matchup']}")
     for totals_entry in total_group['totals']:
-        parts.append(f"📈  {totals_entry['totals_type']} — {totals_entry['odds']}")
+        parts.append(f"{totals_entry['totals_type']} | {totals_entry['odds']}")
     message = "\n".join(parts)
     
     if send_pushover_notification(title, message):
