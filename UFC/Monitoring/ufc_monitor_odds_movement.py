@@ -13,7 +13,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 seen_fights_file = os.path.join(script_dir, 'data', 'seen_fights.txt')
 seen_totals_file = os.path.join(script_dir, 'data', 'seen_totals.txt')
 data_directory = os.path.join(script_dir, '..', 'Scraping', 'data')
-TARGET_PROMOTIONS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage-warriors", "rizin", "bcf", "brave", "uaew", "uae-warriors", "ksw")
+TARGET_PROMOTIONS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage warriors", "rizin", "bcf", "brave", "uaew", "uae warriors", "ksw")
 
 def normalize_text(text):
     return re.sub(r'\s+', ' ', str(text).strip())
@@ -329,13 +329,13 @@ def is_target_event(event_name):
 def process_fightodds_new_fights(file_path, seen_fights):
     if not file_path or not os.path.exists(file_path):
         return []
-    
+
     new_fights = []
     rows = []
     with open(file_path, 'r') as f:
         reader = csv.DictReader(f)
         rows = list(reader)
-    
+
     # Group fighters by event
     events = {}
     for i, row in enumerate(rows):
