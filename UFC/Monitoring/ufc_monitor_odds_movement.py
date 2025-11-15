@@ -77,6 +77,18 @@ def slugify_fighter_for_id(fighter_name):
     return slug.lower()
 
 
+def slugify_event(event_name):
+    """Return an event slug with the date removed so reschedules keep the same ID."""
+    if not event_name:
+        return None
+    base = remove_date_from_event(event_name)
+    base = normalize_text(base)
+    if not base:
+        return None
+    token = re.sub(r'[^a-z0-9]+', '_', base.lower()).strip('_')
+    return token or None
+
+
 def date_from_filename(file_path):
     """Extract YYYYMMDD from filenames like ..._YYYYMMDD_HHMM.ext"""
     if not file_path:
@@ -141,6 +153,19 @@ def normalize_date_text_to_MMDD(date_text):
 
 
 def canonical_fight_id(file_path, event, fighter, source='fightodds', matchup=None):
+    """Return canonical ID that stays stable if the event date text shifts."""
+    fighter_slug = slugify_fighter_for_id(fighter)
+    event_token = slugify_event(event) if event else None
+    if event_token:
+        token = event_token
+    else:
+        token = date_from_filename(file_path)
+        if not token:
+            token = 'unknown'
+    return f"fight_{token}_{fighter_slug}"
+
+
+def legacy_canonical_fight_id(file_path, event, fighter):
     """Return canonical ID: fight_{YYYYMMDD}_{fighter_slug}.
     Prefer date from event; if not present, fall back to date from filename.
     """
@@ -391,21 +416,45 @@ def clean_seen_fights_file():
     if not os.path.exists(seen_fights_file):
         return
     # Read and clean all entries
+    # Legacy no-op kept for backward compatibility.
+    pass
+
+
+def upgrade_seen_fights_file(latest_fight_file=None):
+    """Normalize seen fight IDs and migrate legacy date-based identifiers."""
+    if not os.path.exists(seen_fights_file):
+        return
+    legacy_map = {}
+    if latest_fight_file and os.path.exists(latest_fight_file):
+        with open(latest_fight_file, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                fighter = clean_fighter_name(row.get('Fighters', ''))
+                event = normalize_text(row.get('Event', ''))
+                if not fighter or not event or not is_target_event(event):
+                    continue
+                legacy_id = clean_fight_id_from_file(
+                    legacy_canonical_fight_id(latest_fight_file, event, fighter)
+                )
+                new_id = clean_fight_id_from_file(
+                    canonical_fight_id(latest_fight_file, event, fighter)
+                )
+                if legacy_id != new_id:
+                    legacy_map[legacy_id] = new_id
     cleaned_entries = set()
     with open(seen_fights_file, 'r') as f:
         for line in f:
             normalized = normalize_text(line)
-            if normalized:
-                cleaned = clean_fight_id_from_file(normalized)
-                cleaned_entries.add(cleaned)
-    # Write back cleaned entries
+            if not normalized:
+                continue
+            cleaned = clean_fight_id_from_file(normalized)
+            if not cleaned:
+                continue
+            cleaned_entries.add(legacy_map.get(cleaned, cleaned))
     os.makedirs(os.path.dirname(seen_fights_file), exist_ok=True)
     with open(seen_fights_file, 'w') as f:
         for entry in sorted(cleaned_entries):
             f.write(entry + '\n')
-
-# Clean the file on startup to ensure all existing entries are cleaned
-clean_seen_fights_file()
 
 def clean_seen_totals_file():
     if not os.path.exists(seen_totals_file):
@@ -482,12 +531,14 @@ def process_fightodds_new_totals(file_path, seen_totals):
     # Filter out groups with no totals (in case all were seen)
     return [group for group in groups.values() if group['totals']]
 
+latest_fightodds = get_latest_fightodds_file()
+upgrade_seen_fights_file(latest_fightodds)
+
 seen_fights = load_seen_fights()
 seen_totals = load_seen_totals()
 new_fights = []
 new_totals = []
 
-latest_fightodds = get_latest_fightodds_file()
 if latest_fightodds:
     new_fights.extend(process_fightodds_new_fights(latest_fightodds, seen_fights))
 
