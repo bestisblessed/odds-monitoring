@@ -26,7 +26,6 @@ fightodds_failed = False
 
 print("UFC cron script started")
 
-
 def register_driver_cleanup(driver):
     def _cleanup():
         try:
@@ -160,8 +159,8 @@ def parse_odds_table(html_content, event_name="Unknown Event"):
         columns = ['Event', 'Fighters'] + list(all_sportsbooks)
         return pd.DataFrame(columns=columns)
 
-TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage-warriors", "rizin", "brave", "ksw", "uaew", "uae-warriors")
-
+#TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage-warriors", "rizin", "brave", "ksw", "uaew", "uae-warriors")
+TARGET_PROMOTIONS = ("ufc")
 
 def scrape_fightodds():
     driver = setup_driver()
@@ -218,7 +217,7 @@ def scrape_fightodds():
                 seen_hrefs.add(href)
                 text_lower = text.lower()
                 href_lower = href.lower()
-                if any(keyword in text_lower or keyword in href_lower for keyword in TARGET_PROMOTION_KEYWORDS):
+                if any(keyword in text_lower for keyword in TARGET_PROMOTION_KEYWORDS):
                     target_event_links.append((text, href))
                     # Print only the first line (event name), skip numbers on subsequent lines
                     event_name = text.split('\n')[0].strip()

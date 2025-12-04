@@ -10,6 +10,10 @@ export SCRAPE_TOTALS
 
 date
 
+# Normalize flags to lowercase for consistent checks
+SCRAPE_MONEYLINES="${SCRAPE_MONEYLINES,,}"
+SCRAPE_TOTALS="${SCRAPE_TOTALS,,}"
+
 # Scrape moneylines if enabled
 if [ "$SCRAPE_MONEYLINES" = true ]; then
     echo "Scraping moneylines..."

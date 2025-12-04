@@ -222,7 +222,8 @@ def parse_totals_table(html_content, event_name="Unknown Event"):
         columns = ['Fighter1', 'Fighter2', 'Totals_Type'] + list(all_sportsbooks) + ['Event']
         return pd.DataFrame(columns=columns)
 
-TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage-warriors", "rizin", "brave", "ksw", "uaew", "uae-warriors")
+# TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage-warriors", "rizin", "brave", "ksw", "uaew", "uae-warriors")
+TARGET_PROMOTIONS = ("ufc")
 
 def scrape_fightodds_totals():
     driver = setup_driver()
@@ -273,7 +274,7 @@ def scrape_fightodds_totals():
                 seen_hrefs.add(href)
                 text_lower = text.lower()
                 href_lower = href.lower()
-                if any(keyword in text_lower or keyword in href_lower for keyword in TARGET_PROMOTION_KEYWORDS):
+                if any(keyword in text_lower for keyword in TARGET_PROMOTION_KEYWORDS):
                     target_event_links.append((text, href))
                     # Print only the first line (event name), skip numbers on subsequent lines
                     event_name_display = text.split('\n')[0].strip()
