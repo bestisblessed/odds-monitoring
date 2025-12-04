@@ -21,7 +21,7 @@ import time
 # initialize(statsd_host="localhost", statsd_port=8125)
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
-vsin_failed = False
+# vsin_failed = False  # VSIN disabled
 fightodds_failed = False
 
 print("UFC cron script started")
@@ -299,33 +299,37 @@ def scrape_fightodds():
         return pd.DataFrame()
 
 # Main execution with independent error handling for both parts
-vsin_succeeded = False
+# vsin_succeeded = False  # VSIN disabled
 fightodds_succeeded = False
 
+# VSIN scraping disabled
+# try:
+#     # VSIN
+#     try:
+#         vsin_data = scrape_vsin()
+#         vsin_file = os.path.join(script_dir, 'data', f'ufc_odds_vsin_{datetime.now().strftime("%Y%m%d_%H%M")}.json')
+#         os.makedirs(os.path.dirname(vsin_file), exist_ok=True)
+#         with open(vsin_file, 'w', encoding='utf-8') as f:
+#             json.dump(vsin_data, f, ensure_ascii=False, indent=4)
+#         vsin_succeeded = True
+#         print("VSIN data scraped and saved.")
+#     except Exception:
+#         print("VSIN scrape failed")
+# except Exception:
+#     pass
+
+# FightOdds
 try:
-    # VSIN
-    try:
-        vsin_data = scrape_vsin()
-        vsin_file = os.path.join(script_dir, 'data', f'ufc_odds_vsin_{datetime.now().strftime("%Y%m%d_%H%M")}.json')
-        os.makedirs(os.path.dirname(vsin_file), exist_ok=True)
-        with open(vsin_file, 'w', encoding='utf-8') as f:
-            json.dump(vsin_data, f, ensure_ascii=False, indent=4)
-        vsin_succeeded = True
-        print("VSIN data scraped and saved.")
-    except Exception:
-        print("VSIN scrape failed")
-    # FightOdds
-    try:
-        fightodds_data = scrape_fightodds()
-        if not fightodds_data.empty:
-            fightodds_file = os.path.join(script_dir, 'data', f'ufc_odds_fightoddsio_{datetime.now().strftime("%Y%m%d_%H%M")}.csv')
-            os.makedirs(os.path.dirname(fightodds_file), exist_ok=True)
-            fightodds_data.to_csv(fightodds_file, index=False)
-            fightodds_succeeded = True
-            print("FightOdds data scraped and saved.")
-        else:
-            print("FightOdds scrape returned no data.")
-    except Exception as e:
+    fightodds_data = scrape_fightodds()
+    if not fightodds_data.empty:
+        fightodds_file = os.path.join(script_dir, 'data', f'ufc_odds_fightoddsio_{datetime.now().strftime("%Y%m%d_%H%M")}.csv')
+        os.makedirs(os.path.dirname(fightodds_file), exist_ok=True)
+        fightodds_data.to_csv(fightodds_file, index=False)
+        fightodds_succeeded = True
+        print("FightOdds data scraped and saved.")
+    else:
+        print("FightOdds scrape returned no data.")
+except Exception as e:
         print(f"FightOdds scrape failed: {e}")
         import traceback
         traceback.print_exc()

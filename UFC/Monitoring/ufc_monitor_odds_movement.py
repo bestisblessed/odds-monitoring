@@ -4,9 +4,13 @@ import requests
 import re
 import time
 
+# Configuration flags (read from environment variables set by run script)
+ENABLE_MONEYLINES = os.environ.get('SCRAPE_MONEYLINES', 'true') == 'true'
+ENABLE_TOTALS = os.environ.get('SCRAPE_TOTALS', 'false') == 'true'
+
 PUSHOVER_API_URL = "https://api.pushover.net/1/messages.json"
-PUSHOVER_GROUP_KEY = "gvfx5duzqgajxzy3zcb9kepipm78xn"
-# PUSHOVER_GROUP_KEY = "ucdzy7t32br76dwht5qtz5mt7fg7n3"
+# PUSHOVER_GROUP_KEY = "gvfx5duzqgajxzy3zcb9kepipm78xn"
+PUSHOVER_GROUP_KEY = "ucdzy7t32br76dwht5qtz5mt7fg7n3"
 PUSHOVER_API_TOKEN = "a75tq5kqignpk3p8ndgp66bske3bsi"
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -482,59 +486,84 @@ def process_fightodds_new_totals(file_path, seen_totals):
     # Filter out groups with no totals (in case all were seen)
     return [group for group in groups.values() if group['totals']]
 
+# Load seen data
 seen_fights = load_seen_fights()
 seen_totals = load_seen_totals()
+
+# Simple list of enabled processing types
+enabled_types = []
+if ENABLE_MONEYLINES:
+    enabled_types.append('moneylines')
+if ENABLE_TOTALS:
+    enabled_types.append('totals')
+
+# Process each enabled type
 new_fights = []
 new_totals = []
+has_new_odds = False
 
-latest_fightodds = get_latest_fightodds_file()
-if latest_fightodds:
-    new_fights.extend(process_fightodds_new_fights(latest_fightodds, seen_fights))
+for data_type in enabled_types:
+    if data_type == 'moneylines':
+        latest_file = get_latest_fightodds_file()
+        if latest_file:
+            fights = process_fightodds_new_fights(latest_file, seen_fights)
+            new_fights.extend(fights)
+            if fights:
+                has_new_odds = True
+                print(f"Found {len(fights)} new fights")
 
-latest_totals = get_latest_totals_file()
-if latest_totals:
-    new_totals.extend(process_fightodds_new_totals(latest_totals, seen_totals))
+    elif data_type == 'totals':
+        latest_file = get_latest_totals_file()
+        if latest_file:
+            totals = process_fightodds_new_totals(latest_file, seen_totals)
+            new_totals.extend(totals)
+            if totals:
+                has_new_odds = True
+                print(f"Found {len(totals)} new totals")
 
-if not new_fights and not new_totals:
+if not has_new_odds:
     print("No new odds detected")
     exit(0)
 
-for fight in new_fights:
-    title = "🚨 OPENING ODDS 🚨"
-    
-    parts = [""]
-    if fight.get('event'):
-        event_name = remove_date_from_event(fight['event'])
-        parts.append(f"{event_name}")
-    parts.append(f"{fight['title']} | {fight['odds']}")
-    message = "\n".join(parts)
-    
-    if send_pushover_notification(title, message):
-        save_seen_fight(fight['fight_id'])
-        print(f"Sent notification for: {fight['title']} - {fight['odds']}")
-    else:
-        print(f"Failed to send notification for: {fight['title']}")
+# Send notifications for fights
+if new_fights:
+    for fight in new_fights:
+        title = "🚨 OPENING ODDS 🚨"
+        parts = [""]
+        if fight.get('event'):
+            event_name = remove_date_from_event(fight['event'])
+            parts.append(f"{event_name}")
+        parts.append(f"{fight['title']} | {fight['odds']}")
+        message = "\n".join(parts)
 
-for total_group in new_totals:
-    title = "🚨 TOTALS OPENING ODDS 🚨"
-    
-    parts = [""]
-    if total_group.get('event'):
-        event_name = remove_date_from_event(total_group['event'])
-        parts.append(f"📅  {event_name}")
-    if total_group.get('matchup'):
-        parts.append(f"{total_group['matchup']}")
-    for totals_entry in total_group['totals']:
-        parts.append(f"{totals_entry['totals_type']} | {totals_entry['odds']}")
-    message = "\n".join(parts)
-    
-    if send_pushover_notification(title, message):
-        for total_id in total_group['total_ids']:
-            save_seen_total(total_id, seen_totals)
-        print(f"Sent totals notification for: {total_group.get('matchup', total_group.get('event', 'Totals'))}")
-    else:
-        print("Failed to send totals notification for totals group")
+        if send_pushover_notification(title, message):
+            save_seen_fight(fight['fight_id'])
+            print(f"Sent notification for: {fight['title']} - {fight['odds']}")
+        else:
+            print(f"Failed to send notification for: {fight['title']}")
 
+# Send notifications for totals
+if new_totals:
+    for total_group in new_totals:
+        title = "🚨 TOTALS OPENING ODDS 🚨"
+        parts = [""]
+        if total_group.get('event'):
+            event_name = remove_date_from_event(total_group['event'])
+            parts.append(f"📅  {event_name}")
+        if total_group.get('matchup'):
+            parts.append(f"{total_group['matchup']}")
+        for totals_entry in total_group['totals']:
+            parts.append(f"{totals_entry['totals_type']} | {totals_entry['odds']}")
+        message = "\n".join(parts)
+
+        if send_pushover_notification(title, message):
+            for total_id in total_group['total_ids']:
+                save_seen_total(total_id, seen_totals)
+            print(f"Sent totals notification for: {total_group.get('matchup', total_group.get('event', 'Totals'))}")
+        else:
+            print("Failed to send totals notification for totals group")
+
+# Summary
 if new_fights:
     print(f"Processed {len(new_fights)} new fights")
 if new_totals:
