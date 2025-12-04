@@ -121,7 +121,7 @@ import os
 import glob
 
 print("\nExample format: 20241223 (for Dec 23, 2024)")
-starter_date_default = '20241223'
+starter_date_default = (datetime.now() - timedelta(days=7)).strftime('%Y%m%d')
 current_date = datetime.now().strftime('%Y%m%d')
 
 # Get start date with default
