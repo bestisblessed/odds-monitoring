@@ -3,10 +3,13 @@
 # Configuration flags
 SCRAPE_MONEYLINES=true   # Set to false to disable moneylines scraping + monitoring
 SCRAPE_TOTALS=false      # Set to false to disable totals scraping + monitoring
+TARGET_PROMOTION_KEYWORDS="ufc"  # Comma-separated, no quotes or parentheses
+# "pfl", "lfa", "one", "oktagon", "cwfc", "cage-warriors", "rizin", "brave", "ksw", "uaew", "uae-warriors"
 
 # Export flags as environment variables for the monitoring script
 export SCRAPE_MONEYLINES
 export SCRAPE_TOTALS
+export TARGET_PROMOTION_KEYWORDS
 
 date
 

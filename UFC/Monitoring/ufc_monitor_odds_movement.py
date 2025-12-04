@@ -27,7 +27,15 @@ seen_fights_file = os.path.join(script_dir, 'data', 'seen_fights.txt')
 seen_totals_file = os.path.join(script_dir, 'data', 'seen_totals.txt')
 data_directory = os.path.join(script_dir, '..', 'Scraping', 'data')
 #TARGET_PROMOTIONS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage warriors", "rizin", "bcf", "brave", "uaew", "uae warriors", "ksw")
-TARGET_PROMOTIONS = ("ufc")
+TARGET_PROMOTION_KEYWORDS = os.environ['TARGET_PROMOTION_KEYWORDS'].split(',')
+
+def extract_promotion_from_event(event_name):
+    """Extract promotion name from event name (e.g., 'UFC 323: ...' -> 'UFC')."""
+    if not event_name:
+        return "UNKNOWN"
+    # Take the first word as the promotion
+    promotion = event_name.strip().split()[0].upper()
+    return promotion
 
 def normalize_text(text):
     return re.sub(r'\s+', ' ', str(text).strip())
@@ -353,7 +361,7 @@ def is_target_event(event_name):
     if not event_name:
         return False
     normalized = normalize_text(event_name).lower()
-    return any(keyword in normalized for keyword in TARGET_PROMOTIONS)
+    return any(keyword in normalized for keyword in TARGET_PROMOTION_KEYWORDS)
 
 
 def process_fightodds_new_fights(file_path, seen_fights):
@@ -583,7 +591,8 @@ if not has_new_odds:
 # Send notifications for fights
 if new_fights:
     for fight in new_fights:
-        title = "🚨 OPENING ODDS 🚨"
+        promotion = extract_promotion_from_event(fight.get('event', ''))
+        title = f"🚨 {promotion} OPENING ODDS 🚨"
         parts = [""]
         if fight.get('event'):
             event_name = remove_date_from_event(fight['event'])
@@ -603,7 +612,8 @@ if new_fights:
 # Send notifications for totals
 if new_totals:
     for total_group in new_totals:
-        title = "🚨 TOTALS OPENING ODDS 🚨"
+        promotion = extract_promotion_from_event(total_group.get('event', ''))
+        title = f"🚨 {promotion} TOTALS OPENING ODDS 🚨"
         parts = [""]
         if total_group.get('event'):
             event_name = remove_date_from_event(total_group['event'])
