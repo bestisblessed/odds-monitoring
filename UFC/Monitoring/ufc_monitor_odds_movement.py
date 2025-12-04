@@ -161,6 +161,22 @@ def canonical_fight_id(file_path, event, fighter, source='fightodds', matchup=No
         date_token = 'unknown'
     return f"fight_{date_token}_{fighter_slug}"
 
+
+def canonical_moneyline_group_id(file_path, event, fighter1, fighter2):
+    """Return a canonical ID for a moneyline matchup using the date and both fighters."""
+    date_text = extract_date_from_event(event) if event else None
+    date_token = normalize_date_text_to_MMDD(date_text) if date_text else None
+    if not date_token:
+        date_token = date_from_filename(file_path)
+    if not date_token:
+        date_token = 'unknown'
+    fighter_tokens = '_'.join(
+        filter(None, [slugify_fighter_for_id(fighter1), slugify_fighter_for_id(fighter2)])
+    )
+    if not fighter_tokens:
+        fighter_tokens = 'unknown'
+    return f"fight_{date_token}_{fighter_tokens}"
+
 def canonical_total_group_id(file_path, event, fighter1, fighter2):
     date_text = extract_date_from_event(event) if event else None
     date_token = normalize_date_text_to_MMDD(date_text) if date_text else None
@@ -334,6 +350,16 @@ def process_fightodds_new_fights(file_path, seen_fights):
     if not file_path or not os.path.exists(file_path):
         return []
 
+    def extract_first_odds(row):
+        first_odds = None
+        first_book = None
+        for key, value in row.items():
+            if key not in ['Fighters', 'Event'] and is_valid_odds(value):
+                first_odds = str(value).strip()
+                first_book = key
+                break
+        return f"{first_book}: {first_odds}" if first_odds else None
+
     new_fights = []
     rows = []
     with open(file_path, 'r') as f:
@@ -351,41 +377,60 @@ def process_fightodds_new_fights(file_path, seen_fights):
         if event not in events:
             events[event] = []
         events[event].append((i, fighter, row))
-    
-    # Process each event, pairing consecutive fighters
+
+    # Process each event, pairing consecutive fighters and grouping notifications
     for event, fighters_list in events.items():
-        for idx, (i, fighter, row) in enumerate(fighters_list):
-            opponent = None
-            # Pair consecutive fighters within the same event
-            # If even index, opponent is next fighter (odd index)
-            # If odd index, opponent is previous fighter (even index)
-            if idx % 2 == 0 and idx + 1 < len(fighters_list):
-                opponent = fighters_list[idx + 1][1]
-            elif idx % 2 == 1 and idx > 0:
-                opponent = fighters_list[idx - 1][1]
-            
-            # build a canonical fight id using the file date as fallback
-            fight_id = canonical_fight_id(file_path, event, fighter, source='fightodds')
-            normalized_fight_id = normalize_text(fight_id)
-            if normalized_fight_id not in seen_fights:
-                first_odds = None
-                first_book = None
-                for key, value in row.items():
-                    if key not in ['Fighters', 'Event'] and is_valid_odds(value):
-                        if first_odds is None:
-                            first_odds = str(value).strip()
-                            first_book = key
-                            break
-                
-                if first_odds:
-                    new_fights.append({
-                        'fight_id': normalized_fight_id,
-                        'title': fighter,
-                        'opponent': opponent,
-                        'event': event,
-                        'odds': f"{first_book}: {first_odds}"
-                    })
-    
+        fighters_list.sort(key=lambda x: x[0])
+        for idx in range(0, len(fighters_list), 2):
+            first_entry = fighters_list[idx]
+            second_entry = fighters_list[idx + 1] if idx + 1 < len(fighters_list) else None
+
+            fighter1_name = first_entry[1]
+            fighter1_row = first_entry[2]
+            fighter2_name = second_entry[1] if second_entry else None
+            fighter2_row = second_entry[2] if second_entry else None
+
+            fighter1_id = normalize_text(canonical_fight_id(file_path, event, fighter1_name, source='fightodds'))
+            fighter2_id = normalize_text(canonical_fight_id(file_path, event, fighter2_name, source='fightodds')) if fighter2_name else None
+
+            # Skip if both fighters already seen
+            if fighter1_id in seen_fights and (not fighter2_id or fighter2_id in seen_fights):
+                continue
+
+            fighter1_odds = extract_first_odds(fighter1_row)
+            fighter2_odds = extract_first_odds(fighter2_row) if fighter2_row else None
+
+            # Require at least one fighter to have odds to notify
+            if not fighter1_odds and not fighter2_odds:
+                continue
+
+            matchup_id = canonical_moneyline_group_id(file_path, event, fighter1_name, fighter2_name)
+            normalized_matchup_id = normalize_text(matchup_id)
+
+            fighters_data = []
+            if fighter1_name and fighter1_odds:
+                fighters_data.append({
+                    'name': fighter1_name,
+                    'odds': fighter1_odds,
+                    'fight_id': fighter1_id
+                })
+            if fighter2_name and fighter2_odds:
+                fighters_data.append({
+                    'name': fighter2_name,
+                    'odds': fighter2_odds,
+                    'fight_id': fighter2_id
+                })
+
+            # If no fighter data (e.g., odds missing), skip
+            if not fighters_data:
+                continue
+
+            new_fights.append({
+                'fight_id': normalized_matchup_id,
+                'event': event,
+                'fighters': fighters_data
+            })
+
     return new_fights
 
 # VSIN processing removed — this script only processes fightodds files
@@ -533,14 +578,17 @@ if new_fights:
         if fight.get('event'):
             event_name = remove_date_from_event(fight['event'])
             parts.append(f"{event_name}")
-        parts.append(f"{fight['title']} | {fight['odds']}")
+        for fighter_entry in fight.get('fighters', []):
+            parts.append(f"{fighter_entry['name']} | {fighter_entry['odds']}")
         message = "\n".join(parts)
 
         if send_pushover_notification(title, message):
-            save_seen_fight(fight['fight_id'])
-            print(f"Sent notification for: {fight['title']} - {fight['odds']}")
+            for fighter_entry in fight.get('fighters', []):
+                if fighter_entry.get('fight_id'):
+                    save_seen_fight(fighter_entry['fight_id'])
+            print(f"Sent notification for: {fight.get('event', 'Fight')}")
         else:
-            print(f"Failed to send notification for: {fight['title']}")
+            print(f"Failed to send notification for: {fight.get('event', 'Fight')}")
 
 # Send notifications for totals
 if new_totals:
