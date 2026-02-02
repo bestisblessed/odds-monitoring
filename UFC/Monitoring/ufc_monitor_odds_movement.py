@@ -27,7 +27,8 @@ seen_fights_file = os.path.join(script_dir, 'data', 'seen_fights.txt')
 seen_totals_file = os.path.join(script_dir, 'data', 'seen_totals.txt')
 data_directory = os.path.join(script_dir, '..', 'Scraping', 'data')
 #TARGET_PROMOTIONS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage warriors", "rizin", "bcf", "brave", "uaew", "uae warriors", "ksw")
-TARGET_PROMOTION_KEYWORDS = os.environ['TARGET_PROMOTION_KEYWORDS'].split(',')
+#TARGET_PROMOTION_KEYWORDS = ['ufc', 'pfl', 'lfa', 'one', 'oktagon', 'cwfc', 'cage warriors', 'rizin', 'bcf', 'brave', 'uaew', 'uae warriors', 'ksw']
+TARGET_PROMOTION_KEYWORDS = ['ufc', 'pfl']
 
 def extract_promotion_from_event(event_name):
     """Extract promotion name from event name (e.g., 'UFC 323: ...' -> 'UFC')."""
