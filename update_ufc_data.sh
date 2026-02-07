@@ -3,14 +3,14 @@
 ### Zip UFC Data ###
 current_date=$(date +%b_%d_%y | tr '[:lower:]' '[:upper:]')
 mkdir -p zips
-ssh Trinity "cd /home/trinity/odds-monitoring && \
+ssh durrrrr "cd ~/odds-monitoring && \
     mkdir -p zips && \
     zip -r zips/ufc_backup_${current_date}.zip UFC/Scraping/data/ && \
-    echo 'UFC backup created on Trinity'"
+    echo 'UFC backup created on durrrrr'"
 
 ### Unzip UFC Data ###
 current_date=$(date +%b_%d_%y | tr '[:lower:]' '[:upper:]')
-rsync -av Trinity:/home/trinity/odds-monitoring/zips/ zips/
+rsync -av durrrrr:~/odds-monitoring/zips/ zips/
 mkdir -p UFC/Scraping/data
 unzip -o zips/ufc_backup_${current_date}.zip "UFC/Scraping/data/*" -d ./
 echo "Restored: UFC/Scraping/data/"
