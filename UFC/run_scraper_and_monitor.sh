@@ -20,7 +20,7 @@ SCRAPE_TOTALS="${SCRAPE_TOTALS,,}"
 # Scrape moneylines if enabled
 if [ "$SCRAPE_MONEYLINES" = true ]; then
     echo "Scraping moneylines..."
-    python "${SCRIPT_DIR}/Scraping/ufc.py" >> "${SCRIPT_DIR}/Scraping/log.log" 2>&1
+     /home/durrrrr/.pyenv/shims/python "${SCRIPT_DIR}/Scraping/ufc.py" >> "${SCRIPT_DIR}/Scraping/log.log" 2>&1
 else
     echo "Moneylines scraping disabled"
 fi
@@ -30,7 +30,7 @@ sleep 5
 # Scrape totals if enabled
 if [ "$SCRAPE_TOTALS" = true ]; then
     echo "Scraping totals..."
-    python "${SCRIPT_DIR}/Scraping/ufc_totals.py" >> "${SCRIPT_DIR}/Scraping/log_totals.log" 2>&1
+    /home/durrrrr/.pyenv/shims/python "${SCRIPT_DIR}/Scraping/ufc_totals.py" >> "${SCRIPT_DIR}/Scraping/log_totals.log" 2>&1
 else
     echo "Totals scraping disabled"
 fi
@@ -39,6 +39,6 @@ sleep 5
 
 # Run monitoring (will automatically skip disabled types)
 echo "Running monitoring..."
-python "${SCRIPT_DIR}/Monitoring/ufc_monitor_odds_movement.py" >> "${SCRIPT_DIR}/Monitoring/ufc_monitor.log" 2>&1
+/home/durrrrr/.pyenv/shims/python "${SCRIPT_DIR}/Monitoring/ufc_monitor_odds_movement.py" >> "${SCRIPT_DIR}/Monitoring/ufc_monitor.log" 2>&1
 
 echo ""
