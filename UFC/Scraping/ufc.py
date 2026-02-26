@@ -159,8 +159,8 @@ def parse_odds_table(html_content, event_name="Unknown Event"):
         columns = ['Event', 'Fighters'] + list(all_sportsbooks)
         return pd.DataFrame(columns=columns)
 
-#TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage-warriors", "rizin", "brave", "ksw", "uaew", "uae-warriors")
-TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl")
+TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage-warriors", "brave", "ksw")
+#TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl")
 
 def scrape_fightodds():
     driver = setup_driver()
