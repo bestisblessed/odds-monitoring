@@ -165,7 +165,6 @@ TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cag
 def scrape_fightodds():
     driver = setup_driver()
     driver.get("https://fightodds.io/")
-    time.sleep(3)
     all_data = []
     try:
         target_event_links = []
@@ -186,12 +185,12 @@ def scrape_fightodds():
                         try:
                             driver.execute_script("arguments[0].click();", btn)
                             clicked_promotions.add(keyword)
-                            time.sleep(2)
+                            time.sleep(0.3)
                         except Exception as e:
                             print(f"Error clicking promotion button {btn_text}: {e}")
                         break
-        
-        time.sleep(3)
+
+        time.sleep(0.5)
         
         # Find event links - both regular links and links with role='button' (LFA/ONE style)
         # LFA events use: a.MuiButtonBase-root.MuiListItem-root with href containing '/odds/'
@@ -234,7 +233,7 @@ def scrape_fightodds():
             try:
                 # Open in new window
                 driver.execute_script(f"window.open('{event_url}', '_blank');")
-                time.sleep(2)
+                WebDriverWait(driver, 10).until(lambda d: len(d.window_handles) > 1)
                 windows = driver.window_handles
                 if len(windows) > 1:
                     new_window = [w for w in windows if w != main_window][0]
@@ -244,9 +243,8 @@ def scrape_fightodds():
                         try:
                             WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CLASS_NAME, "MuiTable-root")))
                         except:
-                            # If no table found, page might still be loading or event has no odds yet
-                            time.sleep(2)
-                        time.sleep(2)
+                            # If no table found, event has no odds yet
+                            pass
                         event_html = driver.page_source
                         event_data = parse_odds_table(event_html, event_name)
                         if not event_data.empty:
@@ -269,7 +267,6 @@ def scrape_fightodds():
                                 driver.switch_to.window(driver.window_handles[0])
                         except:
                             pass
-                        time.sleep(0.5)
                 else:
                     print(f"Failed to open new window for {event_name}")
             except Exception as e:

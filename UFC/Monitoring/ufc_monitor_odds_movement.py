@@ -597,7 +597,7 @@ if not has_new_odds:
 if new_fights:
     for fight in new_fights:
         promotion = extract_promotion_from_event(fight.get('event', ''))
-        title = f"🚨 {promotion} OPENING ODDS 🚨"
+        title = f"{promotion} OPENING ODDS 🚨"
         parts = [""]
         if fight.get('event'):
             event_name = remove_date_from_event(fight['event'])
@@ -617,7 +617,7 @@ if new_fights:
 if new_totals:
     for total_group in new_totals:
         promotion = extract_promotion_from_event(total_group.get('event', ''))
-        title = f"🚨 {promotion} TOTALS OPENING ODDS 🚨"
+        title = f"{promotion} TOTALS OPENING ODDS 🚨"
         parts = [""]
         if total_group.get('event'):
             event_name = remove_date_from_event(total_group['event'])
