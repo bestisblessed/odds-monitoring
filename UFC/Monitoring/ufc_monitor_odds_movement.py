@@ -20,8 +20,8 @@ ENABLE_TOTALS = env_flag('SCRAPE_TOTALS', default=False)
 PUSHOVER_API_URL = "https://api.pushover.net/1/messages.json"
 PUSHOVER_API_TOKEN = "a75tq5kqignpk3p8ndgp66bske3bsi" # UFC Odds Monitor APP
 #PUSHOVER_GROUP_KEY = "gvfx5duzqgajxzy3zcb9kepipm78xn" # PolymarketOpenAIBot GROUP
-PUSHOVER_GROUP_KEY = "gvfx5duzqgajxzy3zcb9kepipm78xn" # TheMatrixMMA GROUP
-# PUSHOVER_GROUP_KEY = "ucdzy7t32br76dwht5qtz5mt7fg7n3" # My User Key GROUP
+#PUSHOVER_GROUP_KEY = "gvfx5duzqgajxzy3zcb9kepipm78xn" # TheMatrixMMA GROUP
+PUSHOVER_GROUP_KEY = "ucdzy7t32br76dwht5qtz5mt7fg7n3" # My User Key GROUP
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 seen_fights_file = os.path.join(script_dir, 'data', 'seen_fights.txt')
@@ -450,7 +450,8 @@ def process_fightodds_new_fights(file_path, seen_fights):
             new_fights.append({
                 'fight_id': normalized_matchup_id,
                 'event': event,
-                'fighters': fighters_data
+                'fighters': fighters_data,
+                'all_fight_ids': [fid for fid in [fighter1_id, fighter2_id] if fid]
             })
 
     return new_fights
@@ -606,9 +607,8 @@ if new_fights:
         message = "\n".join(parts)
 
         if send_pushover_notification(title, message):
-            for fighter_entry in fight.get('fighters', []):
-                if fighter_entry.get('fight_id'):
-                    save_seen_fight(fighter_entry['fight_id'])
+            for fight_id in fight.get('all_fight_ids', []):
+                save_seen_fight(fight_id)
             print(f"Sent notification for: {fight.get('event', 'Fight')}")
         else:
             print(f"Failed to send notification for: {fight.get('event', 'Fight')}")
