@@ -163,6 +163,21 @@ def is_valid_odds(value):
     odds_pattern = re.compile(r'^[+-]?\d+$')
     return bool(odds_pattern.match(value_str))
 
+def format_american_odds(value):
+    """Ensure positive American odds include '+' while preserving negatives."""
+    if value is None:
+        return None
+    value_str = str(value).strip()
+    if not is_valid_odds(value_str):
+        return value_str
+    if value_str.startswith(('+', '-')):
+        return value_str
+    try:
+        numeric = int(value_str)
+        return f"+{numeric}" if numeric > 0 else str(numeric)
+    except ValueError:
+        return value_str
+
 def clean_fight_id_from_file(fight_id):
     """Normalize legacy fight IDs from file into a simplified token.
     This attempts to handle previous prefixes like 'fightodds_' and 'vsin_'
@@ -285,9 +300,9 @@ def process_fightodds_new_fights(file_path, seen_fights):
                 first_odds = None
                 first_book = None
                 for key, value in row.items():
-                    if key not in ['Fighters', 'Event'] and is_valid_odds(value):
+                    if key not in ['Fighters', 'Event', 'Event_URL'] and is_valid_odds(value):
                         if first_odds is None:
-                            first_odds = str(value).strip()
+                            first_odds = format_american_odds(value)
                             first_book = key
                             break
                 
@@ -297,6 +312,7 @@ def process_fightodds_new_fights(file_path, seen_fights):
                         'title': fighter,
                         'opponent': opponent,
                         'event': event,
+                        'event_url': row.get('Event_URL', '').strip(),
                         'odds': f"{first_book}: {first_odds}"
                     })
     
@@ -347,6 +363,9 @@ for fight in new_fights:
         parts.append(f"📅  {event_name}")
     parts.append(f"🥊  {fight['title']}")
     parts.append(f"💵  {fight['odds']}")
+    if fight.get('event_url'):
+        parts.append("")
+        parts.append(f"🔗  {fight['event_url']}")
     message = "\n".join(parts)
     
     if send_pushover_notification(title, message):
@@ -373,4 +392,3 @@ for fight in new_fights:
         print(f"Failed to send notification for: {fight['title']}")
 
 print(f"Processed {len(new_fights)} new fights")
-
