@@ -135,6 +135,8 @@ def scrape_fightodds_v2():
 
     for event in target_events:
         event_name = event["name"]
+        event_slug = event.get("slug", "")
+        event_url = f"https://fightodds.io/odds/{event_slug}" if event_slug else ""
         print(event_name)
 
         event_data = fetch_event_odds(event["pk"])
@@ -170,11 +172,13 @@ def scrape_fightodds_v2():
 
             all_rows.append({
                 "Event": formatted_name,
+                "Event_URL": event_url,
                 "Fighters": fighter1_name,
                 **fighter1_odds,
             })
             all_rows.append({
                 "Event": formatted_name,
+                "Event_URL": event_url,
                 "Fighters": fighter2_name,
                 **fighter2_odds,
             })
@@ -188,7 +192,7 @@ def scrape_fightodds_v2():
             df[sb] = ""
     df = df.fillna("")
 
-    first_cols = ["Event", "Fighters"]
+    first_cols = ["Event", "Event_URL", "Fighters"]
     other_cols = [col for col in df.columns if col not in first_cols]
     df = df[first_cols + other_cols]
 

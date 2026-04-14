@@ -255,6 +255,21 @@ def is_valid_odds(value):
     odds_pattern = re.compile(r'^[+-]?\d+$')
     return bool(odds_pattern.match(value_str))
 
+def format_american_odds(value):
+    """Ensure positive American odds include '+' while preserving negatives."""
+    if value is None:
+        return None
+    value_str = str(value).strip()
+    if not is_valid_odds(value_str):
+        return value_str
+    if value_str.startswith(('+', '-')):
+        return value_str
+    try:
+        numeric = int(value_str)
+        return f"+{numeric}" if numeric > 0 else str(numeric)
+    except ValueError:
+        return value_str
+
 def clean_fight_id_from_file(fight_id):
     """Normalize legacy fight IDs from file into a simplified token.
     This attempts to handle previous prefixes like 'fightodds_' and 'vsin_'
@@ -376,8 +391,8 @@ def process_fightodds_new_fights(file_path, seen_fights):
         first_odds = None
         first_book = None
         for key, value in row.items():
-            if key not in ['Fighters', 'Event'] and is_valid_odds(value):
-                first_odds = str(value).strip()
+            if key not in ['Fighters', 'Event', 'Event_URL'] and is_valid_odds(value):
+                first_odds = format_american_odds(value)
                 first_book = key
                 break
         return f"{first_book}: {first_odds}" if first_odds else None
@@ -411,6 +426,9 @@ def process_fightodds_new_fights(file_path, seen_fights):
             fighter1_row = first_entry[2]
             fighter2_name = second_entry[1] if second_entry else None
             fighter2_row = second_entry[2] if second_entry else None
+            event_url = first_entry[2].get('Event_URL', '').strip() or (
+                second_entry[2].get('Event_URL', '').strip() if second_entry else ''
+            )
 
             fighter1_id = normalize_text(canonical_fight_id(file_path, event, fighter1_name, source='fightodds'))
             fighter2_id = normalize_text(canonical_fight_id(file_path, event, fighter2_name, source='fightodds')) if fighter2_name else None
@@ -450,6 +468,7 @@ def process_fightodds_new_fights(file_path, seen_fights):
             new_fights.append({
                 'fight_id': normalized_matchup_id,
                 'event': event,
+                'event_url': event_url,
                 'fighters': fighters_data,
                 'all_fight_ids': [fid for fid in [fighter1_id, fighter2_id] if fid]
             })
@@ -521,7 +540,7 @@ def process_fightodds_new_totals(file_path, seen_totals):
                 if key in ['Fighter1', 'Fighter2', 'Totals_Type', 'Event']:
                     continue
                 if is_valid_odds(value):
-                    first_odds = str(value).strip()
+                    first_odds = format_american_odds(value)
                     first_book = key
                     break
             if first_odds:
@@ -604,6 +623,9 @@ if new_fights:
             parts.append(f"{event_name}")
         for fighter_entry in fight.get('fighters', []):
             parts.append(f"{fighter_entry['name']} | {fighter_entry['odds']}")
+        if fight.get('event_url'):
+            parts.append("")
+            parts.append(fight['event_url'])
         message = "\n".join(parts)
 
         if send_pushover_notification(title, message):
@@ -640,4 +662,3 @@ if new_fights:
     print(f"Processed {len(new_fights)} new fights")
 if new_totals:
     print(f"Processed {len(new_totals)} new totals")
-
