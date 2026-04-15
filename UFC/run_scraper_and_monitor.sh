@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -euo pipefail
+
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -41,4 +43,5 @@ sleep 1
 echo "Running monitoring..."
 /home/durrrrr/.pyenv/shims/python "${SCRIPT_DIR}/Monitoring/ufc_monitor_odds_movement.py" >> "${SCRIPT_DIR}/Monitoring/ufc_monitor.log" 2>&1
 
+echo "HEALTHCHECK_OK: ufc-odds-monitor"
 echo ""
