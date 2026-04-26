@@ -32,6 +32,7 @@ data_directory = os.path.join(script_dir, '..', 'Scraping', 'data')
 #TARGET_PROMOTION_KEYWORDS = ['ufc', 'pfl', 'lfa', 'oktagon', 'cwfc', 'cage warriors', 'rizin', 'ksw']
 #TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage-warriors", "rizin", "brave", "ksw", "uaew", "uae-warriors")
 TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage-warriors", "brave", "ksw")
+EXCLUDED_SPORTSBOOKS = {"polymarket"}
 
 def extract_promotion_from_event(event_name):
     """Extract promotion name from event name (e.g., 'UFC 323: ...' -> 'UFC')."""
@@ -43,6 +44,11 @@ def extract_promotion_from_event(event_name):
 
 def normalize_text(text):
     return re.sub(r'\s+', ' ', str(text).strip())
+
+
+def is_excluded_sportsbook(column_name):
+    """Return True when a CSV odds column should be ignored for alerts."""
+    return normalize_text(column_name).lower() in EXCLUDED_SPORTSBOOKS
 
 def clean_fighter_name(fighter_name):
     """Remove leading numbers and special characters from fighter names."""
@@ -391,7 +397,11 @@ def process_fightodds_new_fights(file_path, seen_fights):
         first_odds = None
         first_book = None
         for key, value in row.items():
-            if key not in ['Fighters', 'Event', 'Event_URL'] and is_valid_odds(value):
+            if (
+                key not in ['Fighters', 'Event', 'Event_URL']
+                and not is_excluded_sportsbook(key)
+                and is_valid_odds(value)
+            ):
                 first_odds = format_american_odds(value)
                 first_book = key
                 break

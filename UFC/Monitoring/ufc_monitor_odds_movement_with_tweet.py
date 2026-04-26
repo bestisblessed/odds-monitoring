@@ -13,9 +13,13 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 seen_fights_file = os.path.join(script_dir, 'data', 'seen_fights.txt')
 data_directory = os.path.join(script_dir, '..', 'Scraping', 'data')
 TARGET_PROMOTIONS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "rizin", "bcf", "brave", "uaew", "ksw")
+EXCLUDED_SPORTSBOOKS = {"polymarket"}
 
 def normalize_text(text):
     return re.sub(r'\s+', ' ', str(text).strip())
+
+def is_excluded_sportsbook(column_name):
+    return normalize_text(column_name).lower() in EXCLUDED_SPORTSBOOKS
 
 def clean_fighter_name(fighter_name):
     """Remove leading numbers and special characters from fighter names."""
@@ -284,7 +288,11 @@ def process_fightodds_new_fights(file_path, seen_fights):
                 first_odds = None
                 first_book = None
                 for key, value in row.items():
-                    if key not in ['Fighters', 'Event'] and is_valid_odds(value):
+                    if (
+                        key not in ['Fighters', 'Event']
+                        and not is_excluded_sportsbook(key)
+                        and is_valid_odds(value)
+                    ):
                         if first_odds is None:
                             first_odds = str(value).strip()
                             first_book = key
@@ -371,4 +379,3 @@ for fight in new_fights:
         print(f"Failed to send notification for: {fight['title']}")
 
 print(f"Processed {len(new_fights)} new fights")
-
