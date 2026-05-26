@@ -1,7 +1,6 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
-# Run scraping first
-/usr/bin/python3.10 /home/bestisblessed/odds-monitoring/UFC/Scraping/ufc.py
+set -euo pipefail
 
-# Run monitoring + n8n
-/usr/bin/python3.10 /home/bestisblessed/odds-monitoring/UFC/Monitoring/ufc_monitor_odds_movement_with_n8n.py
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "${SCRIPT_DIR}/run_scraper_and_monitor_with_n8n.sh"
