@@ -614,6 +614,7 @@ def format_opening_odds_tweet(title, message, sportsbook_urls=None):
     title = normalize_text(title)
     if title:
         lines.append(title)
+        lines.append("")
 
     for raw_line in str(message or "").splitlines():
         line = FIGHTODDS_URL_PATTERN.sub("", raw_line).strip()
@@ -640,6 +641,11 @@ def format_opening_odds_tweet(title, message, sportsbook_urls=None):
         lines.append(url_line)
 
     return "\n".join(lines)
+
+def format_opening_odds_title(promotion, label="OPENING ODDS"):
+    promotion = normalize_text(promotion).upper()
+    label = normalize_text(label).upper()
+    return f"🚨 {promotion} {label} 🚨"
 
 def post_opening_odds_tweet(message):
     x_api_key = get_env_value("X_API_KEY")
@@ -971,7 +977,7 @@ if not has_new_odds:
 if new_fights:
     for fight in new_fights:
         promotion = extract_promotion_from_event(fight.get('event', ''))
-        title = f"{promotion} OPENING ODDS 🚨"
+        title = format_opening_odds_title(promotion)
         parts = [""]
         if fight.get('event'):
             event_name = remove_date_from_event(fight['event'])
@@ -994,7 +1000,7 @@ if new_fights:
 if new_totals:
     for total_group in new_totals:
         promotion = extract_promotion_from_event(total_group.get('event', ''))
-        title = f"{promotion} TOTALS OPENING ODDS 🚨"
+        title = format_opening_odds_title(promotion, "TOTALS OPENING ODDS")
         parts = [""]
         if total_group.get('event'):
             event_name = remove_date_from_event(total_group['event'])
