@@ -1,4 +1,5 @@
 tests/
+.codex/
 *log*
 */*log*
 *.env*
