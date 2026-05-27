@@ -1,8 +1,10 @@
 import os
 import csv
+import json
 import requests
 import re
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Configuration flags (read from environment variables set by run script)
@@ -35,6 +37,8 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 seen_fights_file = os.path.join(script_dir, 'data', 'seen_fights.txt')
 seen_totals_file = os.path.join(script_dir, 'data', 'seen_totals.txt')
 data_directory = os.path.join(script_dir, '..', 'Scraping', 'data')
+MONITOR_VERSION = "v2_n8n"
+MASTER_RUN_LOG_FILE = os.path.join(script_dir, 'ufc_monitor_master.log')
 #TARGET_PROMOTIONS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage warriors", "rizin", "bcf", "brave", "uaew", "uae warriors", "ksw")
 #TARGET_PROMOTION_KEYWORDS = ['ufc', 'pfl', 'lfa', 'one', 'oktagon', 'cwfc', 'cage warriors', 'rizin', 'bcf', 'brave', 'uaew', 'uae warriors', 'ksw']
 #TARGET_PROMOTION_KEYWORDS = ['ufc', 'pfl', 'lfa', 'oktagon', 'cwfc', 'cage warriors', 'rizin', 'ksw']
@@ -54,6 +58,39 @@ ODDS_METADATA_COLUMNS = {
     "fighter2",
     "totals_type",
 }
+
+def utc_timestamp():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+def create_run_log():
+    return {
+        "monitor_version": MONITOR_VERSION,
+        "started_at": utc_timestamp(),
+        "finished_at": None,
+        "latest_moneylines_file": None,
+        "latest_totals_file": None,
+        "fights_detected": 0,
+        "totals_detected": 0,
+        "notifications": [],
+        "seen_ids_written": [],
+        "result": "started",
+    }
+
+RUN_LOG = create_run_log()
+
+def record_notification_status(title, destination, pushover_success, delivery_success):
+    RUN_LOG["notifications"].append({
+        "title": title,
+        "destination": destination,
+        "pushover_success": bool(pushover_success),
+        "delivery_success": bool(delivery_success),
+    })
+
+def append_master_run_log():
+    RUN_LOG["finished_at"] = utc_timestamp()
+    os.makedirs(os.path.dirname(MASTER_RUN_LOG_FILE), exist_ok=True)
+    with open(MASTER_RUN_LOG_FILE, "a") as f:
+        f.write(json.dumps(RUN_LOG, sort_keys=True) + "\n")
 
 def load_env_files(env_paths=None):
     """Load deployment env files when cron does not source them."""
@@ -571,6 +608,7 @@ def save_seen_fight(fight_id):
     normalized_id = clean_fight_id_from_file(normalized_id)
     with open(seen_fights_file, 'a') as f:
         f.write(normalized_id + '\n')
+    RUN_LOG["seen_ids_written"].append(normalized_id)
 
 def save_seen_total(total_id, seen_totals_set=None):
     os.makedirs(os.path.dirname(seen_totals_file), exist_ok=True)
@@ -579,6 +617,7 @@ def save_seen_total(total_id, seen_totals_set=None):
     with open(seen_totals_file, 'a') as f:
         f.write(normalized_id + '\n')
         f.flush()
+    RUN_LOG["seen_ids_written"].append(normalized_id)
     if seen_totals_set is not None:
         seen_totals_set.add(normalized_id)
 
@@ -613,7 +652,6 @@ def format_opening_odds_tweet(title, message, sportsbook_urls=None):
     title = normalize_text(title)
     if title:
         lines.append(title)
-        lines.append("")
 
     for raw_line in str(message or "").splitlines():
         line = FIGHTODDS_URL_PATTERN.sub("", raw_line).strip()
@@ -664,10 +702,14 @@ def send_n8n_opening_odds_webhook(message):
         return False
 
 def send_opening_odds_notification(title, message, sportsbook_urls=None):
-    if not send_pushover_notification(title, message):
+    pushover_success = send_pushover_notification(title, message)
+    delivery_success = False
+    if not pushover_success:
+        record_notification_status(title, "n8n", pushover_success, delivery_success)
         return False
     tweet_message = format_opening_odds_tweet(title, message, sportsbook_urls)
-    send_n8n_opening_odds_webhook(tweet_message)
+    delivery_success = send_n8n_opening_odds_webhook(tweet_message)
+    record_notification_status(title, "n8n", pushover_success, delivery_success)
     return True
 
 def get_latest_fightodds_file():
@@ -921,24 +963,30 @@ has_new_odds = False
 for data_type in enabled_types:
     if data_type == 'moneylines':
         latest_file = get_latest_fightodds_file()
+        RUN_LOG["latest_moneylines_file"] = os.path.basename(latest_file) if latest_file else None
         if latest_file:
             fights = process_fightodds_new_fights(latest_file, seen_fights)
             new_fights.extend(fights)
+            RUN_LOG["fights_detected"] = len(new_fights)
             if fights:
                 has_new_odds = True
                 print(f"Found {len(fights)} new fights")
 
     elif data_type == 'totals':
         latest_file = get_latest_totals_file()
+        RUN_LOG["latest_totals_file"] = os.path.basename(latest_file) if latest_file else None
         if latest_file:
             totals = process_fightodds_new_totals(latest_file, seen_totals)
             new_totals.extend(totals)
+            RUN_LOG["totals_detected"] = len(new_totals)
             if totals:
                 has_new_odds = True
                 print(f"Found {len(totals)} new totals")
 
 if not has_new_odds:
     print("No new odds detected")
+    RUN_LOG["result"] = "no_new_odds"
+    append_master_run_log()
     exit(0)
 
 # Send notifications for fights
@@ -991,3 +1039,5 @@ if new_fights:
     print(f"Processed {len(new_fights)} new fights")
 if new_totals:
     print(f"Processed {len(new_totals)} new totals")
+RUN_LOG["result"] = "completed"
+append_master_run_log()
