@@ -23,6 +23,7 @@ PUSHOVER_API_TOKEN = "a75tq5kqignpk3p8ndgp66bske3bsi" # UFC Odds Monitor APP
 #PUSHOVER_GROUP_KEY = "gvfx5duzqgajxzy3zcb9kepipm78xn" # PolymarketOpenAIBot GROUP
 PUSHOVER_GROUP_KEY = "gvfx5duzqgajxzy3zcb9kepipm78xn" # TheMatrixMMA GROUP
 #PUSHOVER_GROUP_KEY = "ucdzy7t32br76dwht5qtz5mt7fg7n3" # My User Key GROUP
+X_FAILURE_PUSHOVER_GROUP_KEY = "ucdzy7t32br76dwht5qtz5mt7fg7n3" # My User Key GROUP
 X_API_BASE = "https://api.x.com"
 FIGHTODDS_API_URL = "https://api.fightodds.io/gql"
 FIGHTODDS_HEADERS = {
@@ -583,7 +584,7 @@ def save_seen_total(total_id, seen_totals_set=None):
     if seen_totals_set is not None:
         seen_totals_set.add(normalized_id)
 
-def send_pushover_notification(title, message):
+def send_pushover_notification(title, message, group_key=PUSHOVER_GROUP_KEY):
     if len(message) > 1024:
         message = message[:1021] + "..."
     if len(title) > 250:
@@ -591,7 +592,7 @@ def send_pushover_notification(title, message):
     
     data = {
         "token": PUSHOVER_API_TOKEN,
-        "user": PUSHOVER_GROUP_KEY,
+        "user": group_key,
         "title": title,
         "message": message,
         "priority": 0
@@ -608,6 +609,23 @@ def send_pushover_notification(title, message):
     except Exception as e:
         print(f"Error sending Pushover notification: {e}")
         return False
+
+def is_x_credits_depleted_failure(detail):
+    detail_text = str(detail).lower()
+    return (
+        "creditsdepleted" in detail_text
+        or "credits depleted" in detail_text
+        or "/problems/credits" in detail_text
+    )
+
+def send_x_credits_failure_notification(status_code, detail):
+    title = "X API Credits Depleted"
+    message = f"X tweet failed with status {status_code}:\n{detail}"
+    return send_pushover_notification(
+        title,
+        message,
+        group_key=X_FAILURE_PUSHOVER_GROUP_KEY,
+    )
 
 def format_opening_odds_tweet(title, message, sportsbook_urls=None):
     lines = []
@@ -680,6 +698,8 @@ def post_opening_odds_tweet(message):
             except Exception:
                 pass
             print(f"[WARN] X tweet failed ({response.status_code}): {detail}")
+            if response.status_code == 402 and is_x_credits_depleted_failure(detail):
+                send_x_credits_failure_notification(response.status_code, detail)
             return False
 
         try:
