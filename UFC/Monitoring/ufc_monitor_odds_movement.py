@@ -44,7 +44,7 @@ data_directory = os.path.join(script_dir, '..', 'Scraping', 'data')
 TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage-warriors", "brave", "ksw")
 EXCLUDED_SPORTSBOOKS = {"polymarket"}
 TWEET_CHAR_LIMIT = 280
-FIGHTODDS_URL_PATTERN = re.compile(r'https?://\S*fightodds\.io\S*', re.IGNORECASE)
+TWEET_URL_PATTERN = re.compile(r'https?://\S+', re.IGNORECASE)
 HTTP_URL_PATTERN = re.compile(r'^https?://\S+$', re.IGNORECASE)
 ODDS_METADATA_COLUMNS = {
     "event",
@@ -635,7 +635,7 @@ def format_opening_odds_tweet(title, message, sportsbook_urls=None):
         lines.append("")
 
     for raw_line in str(message or "").splitlines():
-        line = FIGHTODDS_URL_PATTERN.sub("", raw_line).strip()
+        line = TWEET_URL_PATTERN.sub("", raw_line).strip()
         if line:
             lines.append(line)
 
@@ -643,16 +643,16 @@ def format_opening_odds_tweet(title, message, sportsbook_urls=None):
     if len(base_text) > TWEET_CHAR_LIMIT:
         return base_text[:TWEET_CHAR_LIMIT - 3].rstrip() + "..."
 
+    # X bills URL-bearing posts as ContentCreateWithUrl, so tweets stay link-free.
+    return base_text
+
+def format_opening_odds_pushover_message(message, sportsbook_urls=None):
+    lines = str(message or "").rstrip().splitlines()
     added_url_separator = False
     for entry in normalize_sportsbook_url_entries(sportsbook_urls):
+        sportsbook = normalize_text(entry.get("sportsbook"))
         url = entry["url"]
-        url_line = url
-        candidate_lines = list(lines)
-        if not added_url_separator:
-            candidate_lines.append("")
-        candidate_lines.append(url_line)
-        if len("\n".join(candidate_lines)) > TWEET_CHAR_LIMIT:
-            continue
+        url_line = f"{sportsbook}: {url}" if sportsbook else url
         if not added_url_separator:
             lines.append("")
             added_url_separator = True
@@ -716,9 +716,10 @@ def post_opening_odds_tweet(message):
         return False
 
 def send_opening_odds_notification(title, message, sportsbook_urls=None):
-    if not send_pushover_notification(title, message):
+    pushover_message = format_opening_odds_pushover_message(message, sportsbook_urls)
+    if not send_pushover_notification(title, pushover_message):
         return False
-    tweet_message = format_opening_odds_tweet(title, message, sportsbook_urls)
+    tweet_message = format_opening_odds_tweet(title, message)
     post_opening_odds_tweet(tweet_message)
     return True
 
