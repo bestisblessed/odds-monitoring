@@ -1,9 +1,13 @@
 tests/
+!tests/
+tests/**
+!tests/test_supabase_odds_publisher.py
 .codex/
 *log*
 */*log*
 *.env*
 data/
+UFC/Scraping/bulk_import/
 zips/
 .ipynb_checkpoints/
 *.zip
