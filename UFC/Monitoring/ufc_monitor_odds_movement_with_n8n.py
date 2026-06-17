@@ -2,25 +2,299 @@ import os
 import csv
 import requests
 import re
-import tweepy
 import time
+from pathlib import Path
+
+# Configuration flags (read from environment variables set by run script)
+#ENABLE_MONEYLINES = os.environ.get('SCRAPE_MONEYLINES', 'true') == 'true'
+#ENABLE_TOTALS = os.environ.get('SCRAPE_TOTALS', 'false') == 'true'
+def env_flag(name, default=False):
+    """Return True if the environment variable is set to a truthy value."""
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    value = str(value).strip().lower()
+    return value in {"1", "true", "yes", "y", "on"}
+ENABLE_MONEYLINES = env_flag('SCRAPE_MONEYLINES', default=True)
+ENABLE_TOTALS = env_flag('SCRAPE_TOTALS', default=False)
 
 PUSHOVER_API_URL = "https://api.pushover.net/1/messages.json"
-# PUSHOVER_GROUP_KEY = "gvfx5duzqgajxzy3zcb9kepipm78xn"
-PUSHOVER_GROUP_KEY = "ucdzy7t32br76dwht5qtz5mt7fg7n3"
-PUSHOVER_API_TOKEN = "a75tq5kqignpk3p8ndgp66bske3bsi"
+PUSHOVER_API_TOKEN = "a75tq5kqignpk3p8ndgp66bske3bsi" # UFC Odds Monitor APP
+#PUSHOVER_GROUP_KEY = "gvfx5duzqgajxzy3zcb9kepipm78xn" # PolymarketOpenAIBot GROUP
+PUSHOVER_GROUP_KEY = "gvfx5duzqgajxzy3zcb9kepipm78xn" # TheMatrixMMA GROUP
+#PUSHOVER_GROUP_KEY = "ucdzy7t32br76dwht5qtz5mt7fg7n3" # My User Key GROUP
+FIGHTODDS_API_URL = "https://api.fightodds.io/gql"
+FIGHTODDS_HEADERS = {
+    "Content-Type": "application/json",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Referer": "https://fightodds.io/",
+    "Origin": "https://fightodds.io",
+}
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 seen_fights_file = os.path.join(script_dir, 'data', 'seen_fights.txt')
+seen_totals_file = os.path.join(script_dir, 'data', 'seen_totals.txt')
 data_directory = os.path.join(script_dir, '..', 'Scraping', 'data')
-TARGET_PROMOTIONS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "rizin", "bcf", "brave", "uaew", "ksw")
+#TARGET_PROMOTIONS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage warriors", "rizin", "bcf", "brave", "uaew", "uae warriors", "ksw")
+#TARGET_PROMOTION_KEYWORDS = ['ufc', 'pfl', 'lfa', 'one', 'oktagon', 'cwfc', 'cage warriors', 'rizin', 'bcf', 'brave', 'uaew', 'uae warriors', 'ksw']
+#TARGET_PROMOTION_KEYWORDS = ['ufc', 'pfl', 'lfa', 'oktagon', 'cwfc', 'cage warriors', 'rizin', 'ksw']
+#TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage-warriors", "rizin", "brave", "ksw", "uaew", "uae-warriors")
+TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage-warriors", "brave", "ksw")
 EXCLUDED_SPORTSBOOKS = {"polymarket"}
+TWEET_CHAR_LIMIT = 280
+FIGHTODDS_URL_PATTERN = re.compile(r'https?://\S*fightodds\.io\S*', re.IGNORECASE)
+HTTP_URL_PATTERN = re.compile(r'^https?://\S+$', re.IGNORECASE)
+ODDS_METADATA_COLUMNS = {
+    "event",
+    "event_url",
+    "fight_id",
+    "fightodds_fight_id",
+    "fighters",
+    "fighter1",
+    "fighter2",
+    "totals_type",
+}
+
+def load_env_files(env_paths=None):
+    """Load deployment env files when cron does not source them."""
+    if env_paths is None:
+        monitor_dir = Path(script_dir)
+        env_paths = [
+            Path.home() / ".env",
+            monitor_dir.parents[1] / ".env",
+            monitor_dir.parent / ".env",
+            monitor_dir / ".env",
+        ]
+
+    loaded_paths = set()
+    for env_path in env_paths:
+        env_path = Path(env_path)
+        if env_path in loaded_paths or not env_path.exists():
+            continue
+        loaded_paths.add(env_path)
+        for raw_line in env_path.read_text(errors="ignore").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            if line.startswith("export "):
+                line = line.split(None, 1)[1]
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+load_env_files()
+
+def get_env_value(*names):
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    return None
+
+def extract_promotion_from_event(event_name):
+    """Extract promotion name from event name (e.g., 'UFC 323: ...' -> 'UFC')."""
+    if not event_name:
+        return "UNKNOWN"
+    # Take the first word as the promotion
+    promotion = event_name.strip().split()[0].upper()
+    return promotion
 
 def normalize_text(text):
     return re.sub(r'\s+', ' ', str(text).strip())
 
+
 def is_excluded_sportsbook(column_name):
+    """Return True when a CSV odds column should be ignored for alerts."""
     return normalize_text(column_name).lower() in EXCLUDED_SPORTSBOOKS
+
+def is_fightodds_url(value):
+    return bool(value and "fightodds.io" in str(value).lower())
+
+def is_sportsbook_url_column(column_name):
+    normalized = normalize_text(column_name).lower()
+    if normalized == "event_url":
+        return False
+    return normalized.endswith(("_url", "_direct_url", "_link", "_direct_link"))
+
+def is_odds_column(column_name):
+    normalized = normalize_text(column_name).lower()
+    return (
+        normalized not in ODDS_METADATA_COLUMNS
+        and not is_sportsbook_url_column(column_name)
+        and not is_excluded_sportsbook(column_name)
+    )
+
+def get_sportsbook_url(row, sportsbook):
+    if not row or not sportsbook:
+        return None
+
+    sportsbook_key = normalize_text(sportsbook)
+    candidate_keys = [
+        f"{sportsbook_key}_URL",
+        f"{sportsbook_key}_url",
+        f"{sportsbook_key}_Direct_URL",
+        f"{sportsbook_key}_direct_url",
+        f"{sportsbook_key}_Link",
+        f"{sportsbook_key}_link",
+        f"{sportsbook_key}_Direct_Link",
+        f"{sportsbook_key}_direct_link",
+    ]
+    for key in candidate_keys:
+        value = str(row.get(key, "")).strip()
+        if value and HTTP_URL_PATTERN.match(value) and not is_fightodds_url(value):
+            return value
+
+    prefix = f"{sportsbook_key.lower()}_"
+    for key, raw_value in row.items():
+        if not normalize_text(key).lower().startswith(prefix):
+            continue
+        value = str(raw_value).strip()
+        if is_sportsbook_url_column(key) and value and HTTP_URL_PATTERN.match(value) and not is_fightodds_url(value):
+            return value
+
+    return None
+
+def normalize_sportsbook_url_entries(sportsbook_urls):
+    entries = []
+    seen = set()
+    for item in sportsbook_urls or []:
+        sportsbook = ""
+        url = ""
+        if isinstance(item, dict):
+            sportsbook = normalize_text(item.get("sportsbook") or item.get("book") or "")
+            url = str(item.get("url") or item.get("direct_link") or item.get("directLink") or "").strip()
+        elif isinstance(item, (tuple, list)) and len(item) >= 2:
+            sportsbook = normalize_text(item[0])
+            url = str(item[1]).strip()
+        else:
+            url = str(item).strip()
+
+        if not url or not HTTP_URL_PATTERN.match(url) or is_fightodds_url(url):
+            continue
+        dedupe_key = (sportsbook.lower(), url)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        entries.append({"sportsbook": sportsbook, "url": url})
+    return entries
+
+def compact_log_detail(value, max_chars=240):
+    detail = str(value).replace("\n", " ").replace("\r", " ").strip()
+    if len(detail) > max_chars:
+        return detail[:max_chars - 3].rstrip() + "..."
+    return detail
+
+def collect_opening_sportsbook_urls(fighters_data):
+    entries = []
+    for fighter_entry in fighters_data or []:
+        sportsbook_url = fighter_entry.get("sportsbook_url")
+        if not sportsbook_url:
+            continue
+        sportsbook = fighter_entry.get("sportsbook")
+        if not sportsbook and ":" in fighter_entry.get("odds", ""):
+            sportsbook = fighter_entry["odds"].split(":", 1)[0]
+        entries.append({"sportsbook": sportsbook or "", "url": sportsbook_url})
+    return normalize_sportsbook_url_entries(entries)
+
+def fetch_fight_direct_links(fight_id, sportsbooks=None):
+    """Fetch direct sportsbook links for one FightOdds fight ID."""
+    if not fight_id:
+        return {}
+
+    desired_sportsbooks = {
+        normalize_text(sportsbook).lower()
+        for sportsbook in (sportsbooks or [])
+        if normalize_text(sportsbook)
+    }
+    query = """
+    query ($fight: ID, $after: String) {
+      allOffers(first: 100, after: $after, fight: $fight) {
+        pageInfo { hasNextPage endCursor }
+        edges {
+          node {
+            directLink
+            offerType { category subCategory description }
+            sportsbook { slug }
+          }
+        }
+      }
+    }
+    """
+
+    links = {}
+    priorities = {}
+    after = None
+    pages_checked = 0
+    while pages_checked < 5:
+        pages_checked += 1
+        response = requests.post(
+            FIGHTODDS_API_URL,
+            json={"query": query, "variables": {"fight": fight_id, "after": after}},
+            headers=FIGHTODDS_HEADERS,
+            timeout=20,
+        )
+        if response.status_code != 200:
+            print(f"FightOdds direct-link lookup failed ({response.status_code}): {compact_log_detail(response.text)}")
+            break
+        payload = response.json()
+        if payload.get("errors"):
+            print(f"FightOdds direct-link lookup errors: {compact_log_detail(payload['errors'])}")
+            break
+
+        offer_connection = (payload.get("data") or {}).get("allOffers")
+        if not offer_connection:
+            break
+        for offer_edge in offer_connection.get("edges", []):
+            offer = offer_edge.get("node") or {}
+            sportsbook = offer.get("sportsbook") or {}
+            slug = sportsbook.get("slug")
+            direct_link = offer.get("directLink")
+            if not slug or not direct_link or is_fightodds_url(direct_link):
+                continue
+            if desired_sportsbooks and slug.lower() not in desired_sportsbooks:
+                continue
+
+            # Straight moneyline offers have no offerType in the current FightOdds API.
+            priority = 0 if not offer.get("offerType") else 1
+            if slug not in links or priority < priorities[slug]:
+                links[slug] = direct_link
+                priorities[slug] = priority
+
+        if desired_sportsbooks and desired_sportsbooks.issubset({slug.lower() for slug in links}):
+            break
+        page_info = offer_connection.get("pageInfo") or {}
+        if not page_info.get("hasNextPage"):
+            break
+        after = page_info.get("endCursor")
+        if not after:
+            break
+
+    return links
+
+def populate_missing_sportsbook_urls(fight_id, fighters_data):
+    missing_sportsbooks = []
+    seen_sportsbooks = set()
+    for fighter_entry in fighters_data or []:
+        sportsbook = fighter_entry.get("sportsbook")
+        sportsbook_key = normalize_text(sportsbook).lower()
+        if sportsbook and not fighter_entry.get("sportsbook_url") and sportsbook_key not in seen_sportsbooks:
+            missing_sportsbooks.append(sportsbook)
+            seen_sportsbooks.add(sportsbook_key)
+    if not fight_id or not missing_sportsbooks:
+        return
+
+    try:
+        direct_links = fetch_fight_direct_links(fight_id, missing_sportsbooks)
+    except Exception as exc:
+        print(f"Could not fetch FightOdds sportsbook direct links: {exc}")
+        return
+
+    for fighter_entry in fighters_data:
+        sportsbook = fighter_entry.get("sportsbook")
+        if sportsbook and not fighter_entry.get("sportsbook_url"):
+            fighter_entry["sportsbook_url"] = direct_links.get(sportsbook)
 
 def clean_fighter_name(fighter_name):
     """Remove leading numbers and special characters from fighter names."""
@@ -38,6 +312,9 @@ def remove_date_from_event(event_name):
     # This matches month names followed by digits and optional trailing digits
     date_pattern = r'\s+(?:JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s+\d+\s+\d+.*$'
     cleaned = re.sub(date_pattern, '', event_name, flags=re.IGNORECASE)
+    # Remove trailing standalone month names (e.g., "UFC 322 ... NOVEMBER")
+    month_only_pattern = r'\s+(?:JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)$'
+    cleaned = re.sub(month_only_pattern, '', cleaned, flags=re.IGNORECASE)
     return cleaned.strip()
 
 def extract_date_from_event(event_name):
@@ -158,6 +435,69 @@ def canonical_fight_id(file_path, event, fighter, source='fightodds', matchup=No
         date_token = 'unknown'
     return f"fight_{date_token}_{fighter_slug}"
 
+
+def canonical_moneyline_group_id(file_path, event, fighter1, fighter2):
+    """Return a canonical ID for a moneyline matchup using the date and both fighters."""
+    date_text = extract_date_from_event(event) if event else None
+    date_token = normalize_date_text_to_MMDD(date_text) if date_text else None
+    if not date_token:
+        date_token = date_from_filename(file_path)
+    if not date_token:
+        date_token = 'unknown'
+    fighter_tokens = '_'.join(
+        filter(None, [slugify_fighter_for_id(fighter1), slugify_fighter_for_id(fighter2)])
+    )
+    if not fighter_tokens:
+        fighter_tokens = 'unknown'
+    return f"fight_{date_token}_{fighter_tokens}"
+
+def canonical_total_group_id(file_path, event, fighter1, fighter2):
+    date_text = extract_date_from_event(event) if event else None
+    date_token = normalize_date_text_to_MMDD(date_text) if date_text else None
+    if not date_token:
+        date_token = 'unknown'
+    fighter_tokens = '_'.join(filter(None, [slugify_fighter_for_id(fighter1), slugify_fighter_for_id(fighter2)]))
+    if not fighter_tokens:
+        fighter_tokens = 'unknown'
+    return f"total_{date_token}_{fighter_tokens}"
+
+def canonical_total_id(file_path, event, totals_type, fighter1, fighter2):
+    group_token = canonical_total_group_id(file_path, event, fighter1, fighter2)
+    totals_token = normalize_text(totals_type).lower().replace(' ', '_')
+    totals_token = re.sub(r'[^a-z0-9_]', '', totals_token)
+    if not totals_token:
+        totals_token = 'total'
+    return f"{group_token}_{totals_token}"
+
+def extract_total_core_id(total_id):
+    """Extract the core part of a total ID (fighters + totals_type) ignoring date format.
+    Handles both old format (total_YYYYMMDD_...) and new format (total_MMDD_...).
+    Returns: total_*_fighter1_fighter2_totals_type (with date part normalized)
+    """
+    if not total_id:
+        return None
+    normalized = normalize_text(total_id)
+    # Match: total_<date>_<fighters>_<totals_type>
+    # Extract everything after the first date part
+    match = re.search(r'^total_\d+_(.+)$', normalized)
+    if match:
+        return match.group(1)
+    return normalized
+
+def is_total_already_seen(total_id, seen_totals):
+    """Check if a total is already seen, handling date format differences."""
+    normalized_total_id = clean_fight_id_from_file(normalize_text(total_id))
+    if normalized_total_id in seen_totals:
+        return True
+    # Check if any seen total has the same core (fighters + totals_type)
+    core_id = extract_total_core_id(normalized_total_id)
+    if core_id:
+        for seen_id in seen_totals:
+            seen_core = extract_total_core_id(seen_id)
+            if seen_core and seen_core == core_id:
+                return True
+    return False
+
 def is_valid_odds(value):
     if not value:
         return False
@@ -211,6 +551,19 @@ def load_seen_fights():
                     seen.add(cleaned)
     return seen
 
+def load_seen_totals():
+    if not os.path.exists(seen_totals_file):
+        return set()
+    seen = set()
+    with open(seen_totals_file, 'r') as f:
+        for line in f:
+            normalized = normalize_text(line)
+            if normalized:
+                cleaned = clean_fight_id_from_file(normalized)
+                if cleaned:
+                    seen.add(cleaned)
+    return seen
+
 def save_seen_fight(fight_id):
     os.makedirs(os.path.dirname(seen_fights_file), exist_ok=True)
     # Assume fight_id provided by processors is already canonical; normalize for safety
@@ -218,6 +571,16 @@ def save_seen_fight(fight_id):
     normalized_id = clean_fight_id_from_file(normalized_id)
     with open(seen_fights_file, 'a') as f:
         f.write(normalized_id + '\n')
+
+def save_seen_total(total_id, seen_totals_set=None):
+    os.makedirs(os.path.dirname(seen_totals_file), exist_ok=True)
+    normalized_id = normalize_text(total_id)
+    normalized_id = clean_fight_id_from_file(normalized_id)
+    with open(seen_totals_file, 'a') as f:
+        f.write(normalized_id + '\n')
+        f.flush()
+    if seen_totals_set is not None:
+        seen_totals_set.add(normalized_id)
 
 def send_pushover_notification(title, message):
     if len(message) > 1024:
@@ -245,10 +608,81 @@ def send_pushover_notification(title, message):
         print(f"Error sending Pushover notification: {e}")
         return False
 
+def format_opening_odds_tweet(title, message, sportsbook_urls=None):
+    lines = []
+    title = normalize_text(title)
+    if title:
+        lines.append(title)
+        lines.append("")
+
+    for raw_line in str(message or "").splitlines():
+        line = FIGHTODDS_URL_PATTERN.sub("", raw_line).strip()
+        if line:
+            lines.append(line)
+
+    base_text = "\n".join(lines)
+    if len(base_text) > TWEET_CHAR_LIMIT:
+        return base_text[:TWEET_CHAR_LIMIT - 3].rstrip() + "..."
+
+    added_url_separator = False
+    for entry in normalize_sportsbook_url_entries(sportsbook_urls):
+        url = entry["url"]
+        url_line = url
+        candidate_lines = list(lines)
+        if not added_url_separator:
+            candidate_lines.append("")
+        candidate_lines.append(url_line)
+        if len("\n".join(candidate_lines)) > TWEET_CHAR_LIMIT:
+            continue
+        if not added_url_separator:
+            lines.append("")
+            added_url_separator = True
+        lines.append(url_line)
+
+    return "\n".join(lines)
+
+def format_opening_odds_title(promotion, label="OPENING ODDS"):
+    promotion = normalize_text(promotion).upper()
+    label = normalize_text(label).upper()
+    return f"🚨 {promotion} {label} 🚨"
+
+def send_n8n_opening_odds_webhook(message):
+    webhook_url = get_env_value("N8N_OPENING_ODDS_WEBHOOK_URL", "N8N_WEBHOOK_URL")
+    if not webhook_url:
+        print("Skipping n8n opening odds webhook: missing webhook URL")
+        return False
+
+    try:
+        response = requests.post(webhook_url, json={"message": message}, timeout=10)
+        if response.status_code >= 400:
+            print(f"n8n opening odds webhook error ({response.status_code}): {response.text}")
+            return False
+        print("Posted opening odds to n8n webhook")
+        return True
+    except Exception as e:
+        print(f"Error posting n8n opening odds webhook: {e}")
+        return False
+
+def send_opening_odds_notification(title, message, sportsbook_urls=None):
+    if not send_pushover_notification(title, message):
+        return False
+    tweet_message = format_opening_odds_tweet(title, message, sportsbook_urls)
+    send_n8n_opening_odds_webhook(tweet_message)
+    return True
+
 def get_latest_fightodds_file():
     if not os.path.exists(data_directory):
         return None
     files = [f for f in os.listdir(data_directory) if re.match(r'ufc_odds_fightoddsio_\d{8}_\d{4}\.csv', f)]
+    if not files:
+        return None
+    files.sort(key=lambda x: re.findall(r'(\d{8}_\d{4})', x)[0], reverse=True)
+    return os.path.join(data_directory, files[0]) if files else None
+
+def get_latest_totals_file():
+    if not os.path.exists(data_directory):
+        return None
+    files = [f for f in os.listdir(data_directory) if re.match(r'ufc_totals_fightoddsio_\d{8}_\d{4}\.csv', f)]
     if not files:
         return None
     files.sort(key=lambda x: re.findall(r'(\d{8}_\d{4})', x)[0], reverse=True)
@@ -260,19 +694,35 @@ def is_target_event(event_name):
     if not event_name:
         return False
     normalized = normalize_text(event_name).lower()
-    return any(keyword in normalized for keyword in TARGET_PROMOTIONS)
+    return any(keyword in normalized for keyword in TARGET_PROMOTION_KEYWORDS)
 
 
 def process_fightodds_new_fights(file_path, seen_fights):
     if not file_path or not os.path.exists(file_path):
         return []
-    
+
+    def extract_first_odds(row):
+        first_odds = None
+        first_book = None
+        for key, value in row.items():
+            if is_odds_column(key) and is_valid_odds(value):
+                first_odds = format_american_odds(value)
+                first_book = key
+                break
+        if not first_odds:
+            return None
+        return {
+            "sportsbook": first_book,
+            "odds": f"{first_book}: {first_odds}",
+            "sportsbook_url": get_sportsbook_url(row, first_book),
+        }
+
     new_fights = []
     rows = []
     with open(file_path, 'r') as f:
         reader = csv.DictReader(f)
         rows = list(reader)
-    
+
     # Group fighters by event
     events = {}
     for i, row in enumerate(rows):
@@ -284,46 +734,76 @@ def process_fightodds_new_fights(file_path, seen_fights):
         if event not in events:
             events[event] = []
         events[event].append((i, fighter, row))
-    
-    # Process each event, pairing consecutive fighters
+
+    # Process each event, pairing consecutive fighters and grouping notifications
     for event, fighters_list in events.items():
-        for idx, (i, fighter, row) in enumerate(fighters_list):
-            opponent = None
-            # Pair consecutive fighters within the same event
-            # If even index, opponent is next fighter (odd index)
-            # If odd index, opponent is previous fighter (even index)
-            if idx % 2 == 0 and idx + 1 < len(fighters_list):
-                opponent = fighters_list[idx + 1][1]
-            elif idx % 2 == 1 and idx > 0:
-                opponent = fighters_list[idx - 1][1]
-            
-            # build a canonical fight id using the file date as fallback
-            fight_id = canonical_fight_id(file_path, event, fighter, source='fightodds')
-            normalized_fight_id = normalize_text(fight_id)
-            if normalized_fight_id not in seen_fights:
-                first_odds = None
-                first_book = None
-                for key, value in row.items():
-                    if (
-                        key not in ['Fighters', 'Event', 'Event_URL']
-                        and not is_excluded_sportsbook(key)
-                        and is_valid_odds(value)
-                    ):
-                        if first_odds is None:
-                            first_odds = format_american_odds(value)
-                            first_book = key
-                            break
-                
-                if first_odds:
-                    new_fights.append({
-                        'fight_id': normalized_fight_id,
-                        'title': fighter,
-                        'opponent': opponent,
-                        'event': event,
-                        'event_url': row.get('Event_URL', '').strip(),
-                        'odds': f"{first_book}: {first_odds}"
-                    })
-    
+        fighters_list.sort(key=lambda x: x[0])
+        for idx in range(0, len(fighters_list), 2):
+            first_entry = fighters_list[idx]
+            second_entry = fighters_list[idx + 1] if idx + 1 < len(fighters_list) else None
+
+            fighter1_name = first_entry[1]
+            fighter1_row = first_entry[2]
+            fighter2_name = second_entry[1] if second_entry else None
+            fighter2_row = second_entry[2] if second_entry else None
+            event_url = first_entry[2].get('Event_URL', '').strip() or (
+                second_entry[2].get('Event_URL', '').strip() if second_entry else ''
+            )
+            fight_api_id = first_entry[2].get('FightOdds_Fight_ID', '').strip() or (
+                second_entry[2].get('FightOdds_Fight_ID', '').strip() if second_entry else ''
+            )
+
+            fighter1_id = normalize_text(canonical_fight_id(file_path, event, fighter1_name, source='fightodds'))
+            fighter2_id = normalize_text(canonical_fight_id(file_path, event, fighter2_name, source='fightodds')) if fighter2_name else None
+
+            # Skip if both fighters already seen
+            if fighter1_id in seen_fights and (not fighter2_id or fighter2_id in seen_fights):
+                continue
+
+            fighter1_odds = extract_first_odds(fighter1_row)
+            fighter2_odds = extract_first_odds(fighter2_row) if fighter2_row else None
+
+            # Require at least one fighter to have odds to notify
+            if not fighter1_odds and not fighter2_odds:
+                continue
+
+            matchup_id = canonical_moneyline_group_id(file_path, event, fighter1_name, fighter2_name)
+            normalized_matchup_id = normalize_text(matchup_id)
+
+            fighters_data = []
+            if fighter1_name and fighter1_odds:
+                fighters_data.append({
+                    'name': fighter1_name,
+                    'odds': fighter1_odds['odds'],
+                    'fight_id': fighter1_id,
+                    'sportsbook': fighter1_odds.get('sportsbook'),
+                    'sportsbook_url': fighter1_odds.get('sportsbook_url')
+                })
+            if fighter2_name and fighter2_odds:
+                fighters_data.append({
+                    'name': fighter2_name,
+                    'odds': fighter2_odds['odds'],
+                    'fight_id': fighter2_id,
+                    'sportsbook': fighter2_odds.get('sportsbook'),
+                    'sportsbook_url': fighter2_odds.get('sportsbook_url')
+                })
+
+            # If no fighter data (e.g., odds missing), skip
+            if not fighters_data:
+                continue
+
+            populate_missing_sportsbook_urls(fight_api_id, fighters_data)
+
+            new_fights.append({
+                'fight_id': normalized_matchup_id,
+                'event': event,
+                'event_url': event_url,
+                'fightodds_fight_id': fight_api_id,
+                'fighters': fighters_data,
+                'sportsbook_urls': collect_opening_sportsbook_urls(fighters_data),
+                'all_fight_ids': [fid for fid in [fighter1_id, fighter2_id] if fid]
+            })
+
     return new_fights
 
 # VSIN processing removed — this script only processes fightodds files
@@ -349,54 +829,165 @@ def clean_seen_fights_file():
 # Clean the file on startup to ensure all existing entries are cleaned
 clean_seen_fights_file()
 
+def clean_seen_totals_file():
+    if not os.path.exists(seen_totals_file):
+        return
+    cleaned_entries = set()
+    with open(seen_totals_file, 'r') as f:
+        for line in f:
+            normalized = normalize_text(line)
+            if normalized:
+                cleaned = clean_fight_id_from_file(normalized)
+                cleaned_entries.add(cleaned)
+    os.makedirs(os.path.dirname(seen_totals_file), exist_ok=True)
+    with open(seen_totals_file, 'w') as f:
+        for entry in sorted(cleaned_entries):
+            f.write(entry + '\n')
+
+clean_seen_totals_file()
+
+def process_fightodds_new_totals(file_path, seen_totals):
+    if not file_path or not os.path.exists(file_path):
+        return []
+    groups = {}
+    with open(file_path, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            totals_type = normalize_text(row.get('Totals_Type', ''))
+            # Skip 0.5 round totals (e.g., "Over 0.5 rounds", "Under 0.5 rounds")
+            # These are typically opening lines that the user does not want notifications for.
+            if re.search(r'0\.5', totals_type):
+                continue
+            event = normalize_text(row.get('Event', ''))
+            if not totals_type or not event or not is_target_event(event):
+                continue
+            fighter1 = clean_fighter_name(row.get('Fighter1', ''))
+            fighter2 = clean_fighter_name(row.get('Fighter2', ''))
+            group_token = canonical_total_group_id(file_path, event, fighter1, fighter2)
+            normalized_group_id = clean_fight_id_from_file(normalize_text(group_token))
+            first_odds = None
+            first_book = None
+            for key, value in row.items():
+                if is_odds_column(key) and is_valid_odds(value):
+                    first_odds = format_american_odds(value)
+                    first_book = key
+                    break
+            if first_odds:
+                total_id = canonical_total_id(file_path, event, totals_type, fighter1, fighter2)
+                normalized_total_id = clean_fight_id_from_file(normalize_text(total_id))
+                if is_total_already_seen(normalized_total_id, seen_totals):
+                    continue
+                matchup = None
+                if fighter1 and fighter2:
+                    matchup = f"{fighter1} vs {fighter2}"
+                elif fighter1 or fighter2:
+                    matchup = fighter1 or fighter2
+                if normalized_group_id not in groups:
+                    groups[normalized_group_id] = {
+                        'group_id': normalized_group_id,
+                        'event': event,
+                        'matchup': matchup,
+                        'totals': [],
+                        'total_ids': []
+                    }
+                group_entry = groups[normalized_group_id]
+                if not group_entry.get('matchup') and matchup:
+                    group_entry['matchup'] = matchup
+                group_entry['totals'].append({
+                    'totals_type': totals_type,
+                    'odds': f"{first_book}: {first_odds}",
+                    'total_id': normalized_total_id
+                })
+                group_entry['total_ids'].append(normalized_total_id)
+    # Filter out groups with no totals (in case all were seen)
+    return [group for group in groups.values() if group['totals']]
+
+# Load seen data
 seen_fights = load_seen_fights()
+seen_totals = load_seen_totals()
+
+# Simple list of enabled processing types
+enabled_types = []
+if ENABLE_MONEYLINES:
+    enabled_types.append('moneylines')
+if ENABLE_TOTALS:
+    enabled_types.append('totals')
+
+# Process each enabled type
 new_fights = []
+new_totals = []
+has_new_odds = False
 
-latest_fightodds = get_latest_fightodds_file()
-if latest_fightodds:
-    new_fights.extend(process_fightodds_new_fights(latest_fightodds, seen_fights))
+for data_type in enabled_types:
+    if data_type == 'moneylines':
+        latest_file = get_latest_fightodds_file()
+        if latest_file:
+            fights = process_fightodds_new_fights(latest_file, seen_fights)
+            new_fights.extend(fights)
+            if fights:
+                has_new_odds = True
+                print(f"Found {len(fights)} new fights")
 
-# VSIN processing removed: only process fightodds files for opening odds notifications
+    elif data_type == 'totals':
+        latest_file = get_latest_totals_file()
+        if latest_file:
+            totals = process_fightodds_new_totals(latest_file, seen_totals)
+            new_totals.extend(totals)
+            if totals:
+                has_new_odds = True
+                print(f"Found {len(totals)} new totals")
 
-if not new_fights:
-    print("No new fights detected")
+if not has_new_odds:
+    print("No new odds detected")
     exit(0)
 
-for fight in new_fights:
-    title = "🚨 OPENING ODDS 🚨"
-    
-    parts = [""]
-    if fight.get('event'):
-        event_name = remove_date_from_event(fight['event'])
-        parts.append(f"📅  {event_name}")
-    parts.append(f"🥊  {fight['title']}")
-    parts.append(f"💵  {fight['odds']}")
-    if fight.get('event_url'):
-        parts.append("")
-        parts.append(f"🔗  {fight['event_url']}")
-    message = "\n".join(parts)
-    
-    if send_pushover_notification(title, message):
-        # # Post to X (Twitter) if credentials are configured
-        # x_api_key = os.getenv("X_API_KEY") or os.getenv("TWITTER_API_KEY")
-        # x_api_secret = os.getenv("X_API_SECRET") or os.getenv("TWITTER_API_SECRET")
-        # x_access_token = os.getenv("X_ACCESS_TOKEN") or os.getenv("TWITTER_ACCESS_TOKEN")
-        # x_access_secret = os.getenv("X_ACCESS_SECRET") or os.getenv("TWITTER_ACCESS_SECRET")
-        # if x_api_key and x_api_secret and x_access_token and x_access_secret:
-        #     client = tweepy.Client(
-        #         consumer_key=x_api_key,
-        #         consumer_secret=x_api_secret,
-        #         access_token=x_access_token,
-        #         access_token_secret=x_access_secret,
-        #     )
-        #     client.create_tweet(text=message[:280])
-        # Forward to n8n webhook if configured
-        if os.getenv("N8N_WEBHOOK_URL"):
-            time.sleep(2)
-            requests.post(os.environ["N8N_WEBHOOK_URL"], json={"message": message}, timeout=10)
-        save_seen_fight(fight['fight_id'])
-        print(f"Sent notification for: {fight['title']} - {fight['odds']}")
-    else:
-        print(f"Failed to send notification for: {fight['title']}")
+# Send notifications for fights
+if new_fights:
+    for fight in new_fights:
+        promotion = extract_promotion_from_event(fight.get('event', ''))
+        title = format_opening_odds_title(promotion)
+        parts = [""]
+        if fight.get('event'):
+            event_name = remove_date_from_event(fight['event'])
+            parts.append(f"{event_name}")
+        for fighter_entry in fight.get('fighters', []):
+            parts.append(f"{fighter_entry['name']} | {fighter_entry['odds']}")
+        if fight.get('event_url'):
+            parts.append("")
+            parts.append(fight['event_url'])
+        message = "\n".join(parts)
 
-print(f"Processed {len(new_fights)} new fights")
+        if send_opening_odds_notification(title, message, fight.get('sportsbook_urls')):
+            for fight_id in fight.get('all_fight_ids', []):
+                save_seen_fight(fight_id)
+            print(f"Sent notification for: {fight.get('event', 'Fight')}")
+        else:
+            print(f"Failed to send notification for: {fight.get('event', 'Fight')}")
+
+# Send notifications for totals
+if new_totals:
+    for total_group in new_totals:
+        promotion = extract_promotion_from_event(total_group.get('event', ''))
+        title = format_opening_odds_title(promotion, "TOTALS OPENING ODDS")
+        parts = [""]
+        if total_group.get('event'):
+            event_name = remove_date_from_event(total_group['event'])
+            parts.append(f"📅  {event_name}")
+        if total_group.get('matchup'):
+            parts.append(f"{total_group['matchup']}")
+        for totals_entry in total_group['totals']:
+            parts.append(f"{totals_entry['totals_type']} | {totals_entry['odds']}")
+        message = "\n".join(parts)
+
+        if send_opening_odds_notification(title, message):
+            for total_id in total_group['total_ids']:
+                save_seen_total(total_id, seen_totals)
+            print(f"Sent totals notification for: {total_group.get('matchup', total_group.get('event', 'Totals'))}")
+        else:
+            print("Failed to send totals notification for totals group")
+
+# Summary
+if new_fights:
+    print(f"Processed {len(new_fights)} new fights")
+if new_totals:
+    print(f"Processed {len(new_totals)} new totals")

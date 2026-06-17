@@ -74,6 +74,7 @@ def fetch_event_odds(pk):
             node {
               fighter1 { firstName lastName }
               fighter2 { firstName lastName }
+              fight { id slug }
               isCancelled
               straightOffers {
                 edges {
@@ -156,6 +157,7 @@ def scrape_fightodds_v2():
             f2 = fight["fighter2"]
             fighter1_name = f"{f1['firstName']} {f1['lastName']}".strip()
             fighter2_name = f"{f2['firstName']} {f2['lastName']}".strip()
+            fight_id = (fight.get("fight") or {}).get("id")
 
             fighter1_odds = {}
             fighter2_odds = {}
@@ -173,12 +175,14 @@ def scrape_fightodds_v2():
             all_rows.append({
                 "Event": formatted_name,
                 "Event_URL": event_url,
+                "FightOdds_Fight_ID": fight_id,
                 "Fighters": fighter1_name,
                 **fighter1_odds,
             })
             all_rows.append({
                 "Event": formatted_name,
                 "Event_URL": event_url,
+                "FightOdds_Fight_ID": fight_id,
                 "Fighters": fighter2_name,
                 **fighter2_odds,
             })
@@ -192,7 +196,7 @@ def scrape_fightodds_v2():
             df[sb] = ""
     df = df.fillna("")
 
-    first_cols = ["Event", "Event_URL", "Fighters"]
+    first_cols = ["Event", "Event_URL", "FightOdds_Fight_ID", "Fighters"]
     other_cols = [col for col in df.columns if col not in first_cols]
     df = df[first_cols + other_cols]
 

@@ -3,6 +3,7 @@ import csv
 import requests
 import re
 import time
+from pathlib import Path
 
 # Configuration flags (read from environment variables set by run script)
 #ENABLE_MONEYLINES = os.environ.get('SCRAPE_MONEYLINES', 'true') == 'true'
@@ -22,6 +23,15 @@ PUSHOVER_API_TOKEN = "a75tq5kqignpk3p8ndgp66bske3bsi" # UFC Odds Monitor APP
 #PUSHOVER_GROUP_KEY = "gvfx5duzqgajxzy3zcb9kepipm78xn" # PolymarketOpenAIBot GROUP
 PUSHOVER_GROUP_KEY = "gvfx5duzqgajxzy3zcb9kepipm78xn" # TheMatrixMMA GROUP
 #PUSHOVER_GROUP_KEY = "ucdzy7t32br76dwht5qtz5mt7fg7n3" # My User Key GROUP
+X_FAILURE_PUSHOVER_GROUP_KEY = "ucdzy7t32br76dwht5qtz5mt7fg7n3" # My User Key GROUP
+X_API_BASE = "https://api.x.com"
+FIGHTODDS_API_URL = "https://api.fightodds.io/gql"
+FIGHTODDS_HEADERS = {
+    "Content-Type": "application/json",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Referer": "https://fightodds.io/",
+    "Origin": "https://fightodds.io",
+}
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 seen_fights_file = os.path.join(script_dir, 'data', 'seen_fights.txt')
@@ -33,6 +43,57 @@ data_directory = os.path.join(script_dir, '..', 'Scraping', 'data')
 #TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage-warriors", "rizin", "brave", "ksw", "uaew", "uae-warriors")
 TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage-warriors", "brave", "ksw")
 EXCLUDED_SPORTSBOOKS = {"polymarket"}
+TWEET_CHAR_LIMIT = 280
+TWEET_URL_PATTERN = re.compile(r'https?://\S+', re.IGNORECASE)
+HTTP_URL_PATTERN = re.compile(r'^https?://\S+$', re.IGNORECASE)
+ODDS_METADATA_COLUMNS = {
+    "event",
+    "event_url",
+    "fight_id",
+    "fightodds_fight_id",
+    "fighters",
+    "fighter1",
+    "fighter2",
+    "totals_type",
+}
+
+def load_env_files(env_paths=None):
+    """Load deployment env files when cron does not source them."""
+    if env_paths is None:
+        monitor_dir = Path(script_dir)
+        env_paths = [
+            Path.home() / ".env",
+            monitor_dir.parents[1] / ".env",
+            monitor_dir.parent / ".env",
+            monitor_dir / ".env",
+        ]
+
+    loaded_paths = set()
+    for env_path in env_paths:
+        env_path = Path(env_path)
+        if env_path in loaded_paths or not env_path.exists():
+            continue
+        loaded_paths.add(env_path)
+        for raw_line in env_path.read_text(errors="ignore").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            if line.startswith("export "):
+                line = line.split(None, 1)[1]
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+load_env_files()
+
+def get_env_value(*names):
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    return None
 
 def extract_promotion_from_event(event_name):
     """Extract promotion name from event name (e.g., 'UFC 323: ...' -> 'UFC')."""
@@ -49,6 +110,193 @@ def normalize_text(text):
 def is_excluded_sportsbook(column_name):
     """Return True when a CSV odds column should be ignored for alerts."""
     return normalize_text(column_name).lower() in EXCLUDED_SPORTSBOOKS
+
+def is_fightodds_url(value):
+    return bool(value and "fightodds.io" in str(value).lower())
+
+def is_sportsbook_url_column(column_name):
+    normalized = normalize_text(column_name).lower()
+    if normalized == "event_url":
+        return False
+    return normalized.endswith(("_url", "_direct_url", "_link", "_direct_link"))
+
+def is_odds_column(column_name):
+    normalized = normalize_text(column_name).lower()
+    return (
+        normalized not in ODDS_METADATA_COLUMNS
+        and not is_sportsbook_url_column(column_name)
+        and not is_excluded_sportsbook(column_name)
+    )
+
+def get_sportsbook_url(row, sportsbook):
+    if not row or not sportsbook:
+        return None
+
+    sportsbook_key = normalize_text(sportsbook)
+    candidate_keys = [
+        f"{sportsbook_key}_URL",
+        f"{sportsbook_key}_url",
+        f"{sportsbook_key}_Direct_URL",
+        f"{sportsbook_key}_direct_url",
+        f"{sportsbook_key}_Link",
+        f"{sportsbook_key}_link",
+        f"{sportsbook_key}_Direct_Link",
+        f"{sportsbook_key}_direct_link",
+    ]
+    for key in candidate_keys:
+        value = str(row.get(key, "")).strip()
+        if value and HTTP_URL_PATTERN.match(value) and not is_fightodds_url(value):
+            return value
+
+    prefix = f"{sportsbook_key.lower()}_"
+    for key, raw_value in row.items():
+        if not normalize_text(key).lower().startswith(prefix):
+            continue
+        value = str(raw_value).strip()
+        if is_sportsbook_url_column(key) and value and HTTP_URL_PATTERN.match(value) and not is_fightodds_url(value):
+            return value
+
+    return None
+
+def normalize_sportsbook_url_entries(sportsbook_urls):
+    entries = []
+    seen = set()
+    for item in sportsbook_urls or []:
+        sportsbook = ""
+        url = ""
+        if isinstance(item, dict):
+            sportsbook = normalize_text(item.get("sportsbook") or item.get("book") or "")
+            url = str(item.get("url") or item.get("direct_link") or item.get("directLink") or "").strip()
+        elif isinstance(item, (tuple, list)) and len(item) >= 2:
+            sportsbook = normalize_text(item[0])
+            url = str(item[1]).strip()
+        else:
+            url = str(item).strip()
+
+        if not url or not HTTP_URL_PATTERN.match(url) or is_fightodds_url(url):
+            continue
+        dedupe_key = (sportsbook.lower(), url)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        entries.append({"sportsbook": sportsbook, "url": url})
+    return entries
+
+def compact_log_detail(value, max_chars=240):
+    detail = str(value).replace("\n", " ").replace("\r", " ").strip()
+    if len(detail) > max_chars:
+        return detail[:max_chars - 3].rstrip() + "..."
+    return detail
+
+def collect_opening_sportsbook_urls(fighters_data):
+    entries = []
+    for fighter_entry in fighters_data or []:
+        sportsbook_url = fighter_entry.get("sportsbook_url")
+        if not sportsbook_url:
+            continue
+        sportsbook = fighter_entry.get("sportsbook")
+        if not sportsbook and ":" in fighter_entry.get("odds", ""):
+            sportsbook = fighter_entry["odds"].split(":", 1)[0]
+        entries.append({"sportsbook": sportsbook or "", "url": sportsbook_url})
+    return normalize_sportsbook_url_entries(entries)
+
+def fetch_fight_direct_links(fight_id, sportsbooks=None):
+    """Fetch direct sportsbook links for one FightOdds fight ID."""
+    if not fight_id:
+        return {}
+
+    desired_sportsbooks = {
+        normalize_text(sportsbook).lower()
+        for sportsbook in (sportsbooks or [])
+        if normalize_text(sportsbook)
+    }
+    query = """
+    query ($fight: ID, $after: String) {
+      allOffers(first: 100, after: $after, fight: $fight) {
+        pageInfo { hasNextPage endCursor }
+        edges {
+          node {
+            directLink
+            offerType { category subCategory description }
+            sportsbook { slug }
+          }
+        }
+      }
+    }
+    """
+
+    links = {}
+    priorities = {}
+    after = None
+    pages_checked = 0
+    while pages_checked < 5:
+        pages_checked += 1
+        response = requests.post(
+            FIGHTODDS_API_URL,
+            json={"query": query, "variables": {"fight": fight_id, "after": after}},
+            headers=FIGHTODDS_HEADERS,
+            timeout=20,
+        )
+        if response.status_code != 200:
+            print(f"FightOdds direct-link lookup failed ({response.status_code}): {compact_log_detail(response.text)}")
+            break
+        payload = response.json()
+        if payload.get("errors"):
+            print(f"FightOdds direct-link lookup errors: {compact_log_detail(payload['errors'])}")
+            break
+
+        offer_connection = (payload.get("data") or {}).get("allOffers")
+        if not offer_connection:
+            break
+        for offer_edge in offer_connection.get("edges", []):
+            offer = offer_edge.get("node") or {}
+            sportsbook = offer.get("sportsbook") or {}
+            slug = sportsbook.get("slug")
+            direct_link = offer.get("directLink")
+            if not slug or not direct_link or is_fightodds_url(direct_link):
+                continue
+            if desired_sportsbooks and slug.lower() not in desired_sportsbooks:
+                continue
+
+            # Straight moneyline offers have no offerType in the current FightOdds API.
+            priority = 0 if not offer.get("offerType") else 1
+            if slug not in links or priority < priorities[slug]:
+                links[slug] = direct_link
+                priorities[slug] = priority
+
+        if desired_sportsbooks and desired_sportsbooks.issubset({slug.lower() for slug in links}):
+            break
+        page_info = offer_connection.get("pageInfo") or {}
+        if not page_info.get("hasNextPage"):
+            break
+        after = page_info.get("endCursor")
+        if not after:
+            break
+
+    return links
+
+def populate_missing_sportsbook_urls(fight_id, fighters_data):
+    missing_sportsbooks = []
+    seen_sportsbooks = set()
+    for fighter_entry in fighters_data or []:
+        sportsbook = fighter_entry.get("sportsbook")
+        sportsbook_key = normalize_text(sportsbook).lower()
+        if sportsbook and not fighter_entry.get("sportsbook_url") and sportsbook_key not in seen_sportsbooks:
+            missing_sportsbooks.append(sportsbook)
+            seen_sportsbooks.add(sportsbook_key)
+    if not fight_id or not missing_sportsbooks:
+        return
+
+    try:
+        direct_links = fetch_fight_direct_links(fight_id, missing_sportsbooks)
+    except Exception as exc:
+        print(f"Could not fetch FightOdds sportsbook direct links: {exc}")
+        return
+
+    for fighter_entry in fighters_data:
+        sportsbook = fighter_entry.get("sportsbook")
+        if sportsbook and not fighter_entry.get("sportsbook_url"):
+            fighter_entry["sportsbook_url"] = direct_links.get(sportsbook)
 
 def clean_fighter_name(fighter_name):
     """Remove leading numbers and special characters from fighter names."""
@@ -336,7 +584,7 @@ def save_seen_total(total_id, seen_totals_set=None):
     if seen_totals_set is not None:
         seen_totals_set.add(normalized_id)
 
-def send_pushover_notification(title, message):
+def send_pushover_notification(title, message, group_key=PUSHOVER_GROUP_KEY):
     if len(message) > 1024:
         message = message[:1021] + "..."
     if len(title) > 250:
@@ -344,7 +592,7 @@ def send_pushover_notification(title, message):
     
     data = {
         "token": PUSHOVER_API_TOKEN,
-        "user": PUSHOVER_GROUP_KEY,
+        "user": group_key,
         "title": title,
         "message": message,
         "priority": 0
@@ -361,6 +609,119 @@ def send_pushover_notification(title, message):
     except Exception as e:
         print(f"Error sending Pushover notification: {e}")
         return False
+
+def is_x_credits_depleted_failure(detail):
+    detail_text = str(detail).lower()
+    return (
+        "creditsdepleted" in detail_text
+        or "credits depleted" in detail_text
+        or "/problems/credits" in detail_text
+    )
+
+def send_x_credits_failure_notification(status_code, detail):
+    title = "X API Credits Depleted"
+    message = f"X tweet failed with status {status_code}:\n{detail}"
+    return send_pushover_notification(
+        title,
+        message,
+        group_key=X_FAILURE_PUSHOVER_GROUP_KEY,
+    )
+
+def format_opening_odds_tweet(title, message, sportsbook_urls=None):
+    lines = []
+    title = normalize_text(title)
+    if title:
+        lines.append(title)
+        lines.append("")
+
+    for raw_line in str(message or "").splitlines():
+        line = TWEET_URL_PATTERN.sub("", raw_line).strip()
+        if line:
+            lines.append(line)
+
+    base_text = "\n".join(lines)
+    if len(base_text) > TWEET_CHAR_LIMIT:
+        return base_text[:TWEET_CHAR_LIMIT - 3].rstrip() + "..."
+
+    # X bills URL-bearing posts as ContentCreateWithUrl, so tweets stay link-free.
+    return base_text
+
+def format_opening_odds_pushover_message(message, sportsbook_urls=None):
+    lines = str(message or "").rstrip().splitlines()
+    added_url_separator = False
+    for entry in normalize_sportsbook_url_entries(sportsbook_urls):
+        sportsbook = normalize_text(entry.get("sportsbook"))
+        url = entry["url"]
+        url_line = f"{sportsbook}: {url}" if sportsbook else url
+        if not added_url_separator:
+            lines.append("")
+            added_url_separator = True
+        lines.append(url_line)
+
+    return "\n".join(lines)
+
+def format_opening_odds_title(promotion, label="OPENING ODDS"):
+    promotion = normalize_text(promotion).upper()
+    label = normalize_text(label).upper()
+    return f"🚨 {promotion} {label} 🚨"
+
+def post_opening_odds_tweet(message):
+    x_api_key = get_env_value("X_API_KEY")
+    x_api_secret = get_env_value("X_API_SECRET")
+    x_access_token = get_env_value("X_ACCESS_TOKEN")
+    x_access_token_secret = get_env_value("X_ACCESS_TOKEN_SECRET")
+    if not all([x_api_key, x_api_secret, x_access_token, x_access_token_secret]):
+        print("[WARN] X tweet skipped: missing X API credentials")
+        return False
+
+    try:
+        from requests_oauthlib import OAuth1
+
+        response = requests.request(
+            "POST",
+            f"{X_API_BASE}/2/tweets",
+            headers={"Content-Type": "application/json"},
+            auth=OAuth1(x_api_key, x_api_secret, x_access_token, x_access_token_secret),
+            json={"text": message[:280]},
+            timeout=int(os.environ.get("X_TIMEOUT_SECONDS", "30")),
+        )
+        if not response.ok:
+            detail = response.text
+            try:
+                payload = response.json()
+                errors = payload.get("errors") if isinstance(payload, dict) else None
+                if errors and isinstance(errors, list):
+                    first_error = errors[0]
+                    detail = first_error.get("detail") or first_error.get("title") or payload
+                else:
+                    detail = payload
+            except Exception:
+                pass
+            print(f"[WARN] X tweet failed ({response.status_code}): {detail}")
+            if response.status_code == 402 and is_x_credits_depleted_failure(detail):
+                send_x_credits_failure_notification(response.status_code, detail)
+            return False
+
+        try:
+            tweet_id = response.json().get("data", {}).get("id")
+        except Exception:
+            tweet_id = None
+        if tweet_id:
+            print(f"Posted opening odds tweet via X API: {tweet_id}")
+        else:
+            print("Posted opening odds tweet via X API")
+        return True
+    except Exception as e:
+        print(f"[ERROR] X tweet error: {e}")
+        return False
+
+def send_opening_odds_notification(title, message, sportsbook_urls=None):
+    pushover_message = format_opening_odds_pushover_message(message, sportsbook_urls)
+    if not send_pushover_notification(title, pushover_message):
+        return False
+    tweet_message = format_opening_odds_tweet(title, message)
+    post_opening_odds_tweet(tweet_message)
+    return True
 
 def get_latest_fightodds_file():
     if not os.path.exists(data_directory):
@@ -397,15 +758,17 @@ def process_fightodds_new_fights(file_path, seen_fights):
         first_odds = None
         first_book = None
         for key, value in row.items():
-            if (
-                key not in ['Fighters', 'Event', 'Event_URL']
-                and not is_excluded_sportsbook(key)
-                and is_valid_odds(value)
-            ):
+            if is_odds_column(key) and is_valid_odds(value):
                 first_odds = format_american_odds(value)
                 first_book = key
                 break
-        return f"{first_book}: {first_odds}" if first_odds else None
+        if not first_odds:
+            return None
+        return {
+            "sportsbook": first_book,
+            "odds": f"{first_book}: {first_odds}",
+            "sportsbook_url": get_sportsbook_url(row, first_book),
+        }
 
     new_fights = []
     rows = []
@@ -439,6 +802,9 @@ def process_fightodds_new_fights(file_path, seen_fights):
             event_url = first_entry[2].get('Event_URL', '').strip() or (
                 second_entry[2].get('Event_URL', '').strip() if second_entry else ''
             )
+            fight_api_id = first_entry[2].get('FightOdds_Fight_ID', '').strip() or (
+                second_entry[2].get('FightOdds_Fight_ID', '').strip() if second_entry else ''
+            )
 
             fighter1_id = normalize_text(canonical_fight_id(file_path, event, fighter1_name, source='fightodds'))
             fighter2_id = normalize_text(canonical_fight_id(file_path, event, fighter2_name, source='fightodds')) if fighter2_name else None
@@ -461,25 +827,33 @@ def process_fightodds_new_fights(file_path, seen_fights):
             if fighter1_name and fighter1_odds:
                 fighters_data.append({
                     'name': fighter1_name,
-                    'odds': fighter1_odds,
-                    'fight_id': fighter1_id
+                    'odds': fighter1_odds['odds'],
+                    'fight_id': fighter1_id,
+                    'sportsbook': fighter1_odds.get('sportsbook'),
+                    'sportsbook_url': fighter1_odds.get('sportsbook_url')
                 })
             if fighter2_name and fighter2_odds:
                 fighters_data.append({
                     'name': fighter2_name,
-                    'odds': fighter2_odds,
-                    'fight_id': fighter2_id
+                    'odds': fighter2_odds['odds'],
+                    'fight_id': fighter2_id,
+                    'sportsbook': fighter2_odds.get('sportsbook'),
+                    'sportsbook_url': fighter2_odds.get('sportsbook_url')
                 })
 
             # If no fighter data (e.g., odds missing), skip
             if not fighters_data:
                 continue
 
+            populate_missing_sportsbook_urls(fight_api_id, fighters_data)
+
             new_fights.append({
                 'fight_id': normalized_matchup_id,
                 'event': event,
                 'event_url': event_url,
+                'fightodds_fight_id': fight_api_id,
                 'fighters': fighters_data,
+                'sportsbook_urls': collect_opening_sportsbook_urls(fighters_data),
                 'all_fight_ids': [fid for fid in [fighter1_id, fighter2_id] if fid]
             })
 
@@ -547,9 +921,7 @@ def process_fightodds_new_totals(file_path, seen_totals):
             first_odds = None
             first_book = None
             for key, value in row.items():
-                if key in ['Fighter1', 'Fighter2', 'Totals_Type', 'Event']:
-                    continue
-                if is_valid_odds(value):
+                if is_odds_column(key) and is_valid_odds(value):
                     first_odds = format_american_odds(value)
                     first_book = key
                     break
@@ -626,7 +998,7 @@ if not has_new_odds:
 if new_fights:
     for fight in new_fights:
         promotion = extract_promotion_from_event(fight.get('event', ''))
-        title = f"{promotion} OPENING ODDS 🚨"
+        title = format_opening_odds_title(promotion)
         parts = [""]
         if fight.get('event'):
             event_name = remove_date_from_event(fight['event'])
@@ -638,7 +1010,7 @@ if new_fights:
             parts.append(fight['event_url'])
         message = "\n".join(parts)
 
-        if send_pushover_notification(title, message):
+        if send_opening_odds_notification(title, message, fight.get('sportsbook_urls')):
             for fight_id in fight.get('all_fight_ids', []):
                 save_seen_fight(fight_id)
             print(f"Sent notification for: {fight.get('event', 'Fight')}")
@@ -649,7 +1021,7 @@ if new_fights:
 if new_totals:
     for total_group in new_totals:
         promotion = extract_promotion_from_event(total_group.get('event', ''))
-        title = f"{promotion} TOTALS OPENING ODDS 🚨"
+        title = format_opening_odds_title(promotion, "TOTALS OPENING ODDS")
         parts = [""]
         if total_group.get('event'):
             event_name = remove_date_from_event(total_group['event'])
@@ -660,7 +1032,7 @@ if new_totals:
             parts.append(f"{totals_entry['totals_type']} | {totals_entry['odds']}")
         message = "\n".join(parts)
 
-        if send_pushover_notification(title, message):
+        if send_opening_odds_notification(title, message):
             for total_id in total_group['total_ids']:
                 save_seen_total(total_id, seen_totals)
             print(f"Sent totals notification for: {total_group.get('matchup', total_group.get('event', 'Totals'))}")

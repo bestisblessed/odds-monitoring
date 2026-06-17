@@ -23,6 +23,10 @@ SCRAPE_TOTALS="${SCRAPE_TOTALS,,}"
 if [ "$SCRAPE_MONEYLINES" = true ]; then
     echo "Scraping moneylines..."
      /home/durrrrr/.pyenv/shims/python "${SCRIPT_DIR}/Scraping/ufc_v2.py" >> "${SCRIPT_DIR}/Scraping/log.log" 2>&1
+    echo "Appending latest moneylines to compact Supabase line history..."
+    if ! /home/durrrrr/.pyenv/shims/python "${SCRIPT_DIR}/Scraping/supabase_odds_publisher.py" --line-history --live >> "${SCRIPT_DIR}/Scraping/supabase_publish.log" 2>&1; then
+        echo "Supabase odds publish failed; continuing to monitoring." >> "${SCRIPT_DIR}/Scraping/supabase_publish.log"
+    fi
 else
     echo "Moneylines scraping disabled"
 fi
