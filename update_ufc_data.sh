@@ -24,7 +24,7 @@ cp /Users/td/Code/odds-monitoring/UFC/Analysis/data/ufc_odds_movements_fightodds
 
 echo "Copying to swift app server.."
 cp /Users/td/Code/odds-monitoring/UFC/Analysis/data/ufc_odds_movements_fightoddsio.csv /Users/td/Code/mma-ai-swift-app/data
-scp /Users/td/Code/odds-monitoring/UFC/Analysis/data/ufc_odds_movements_fightoddsio.csv Trinity:/home/trinity/mma-ai-swift-app/data/
+scp /Users/td/Code/odds-monitoring/UFC/Analysis/data/ufc_odds_movements_fightoddsio.csv donpablo:/Users/pablo/Code/mma-ai-swift-app/data/
 
 #git add data/ufc_odds_movements_fightoddsio.csv -f
 #git commit -m "update odds data"
@@ -36,4 +36,4 @@ scp /Users/td/Code/odds-monitoring/UFC/Analysis/data/ufc_odds_movements_fightodd
 #git push
 
 # DELETE REMOTE UFC ODDS DATA FILES
-#ssh Trinity "rm -rf /home/trinity/odds-monitoring/UFC/Scraping/data/* && echo 'Cleared UFC data files on Trinity'"
+#ssh durrrrr "rm -rf ~/odds-monitoring/UFC/Scraping/data/* && echo 'Cleared UFC data files on durrrrr'"
