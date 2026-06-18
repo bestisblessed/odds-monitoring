@@ -647,7 +647,12 @@ def format_opening_odds_tweet(title, message, sportsbook_urls=None):
     return base_text
 
 def format_opening_odds_pushover_message(message, sportsbook_urls=None):
-    lines = str(message or "").rstrip().splitlines()
+    lines = [
+        line for line in str(message or "").rstrip().splitlines()
+        if not is_fightodds_url(line.strip())
+    ]
+    while lines and not lines[-1].strip():
+        lines.pop()
     added_url_separator = False
     for entry in normalize_sportsbook_url_entries(sportsbook_urls):
         sportsbook = normalize_text(entry.get("sportsbook"))
