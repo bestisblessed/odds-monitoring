@@ -5,14 +5,14 @@ current_date=$(date +%b_%d_%y | tr '[:lower:]' '[:upper:]')
 mkdir -p zips
 ssh durrrrr "cd ~/odds-monitoring && \
     mkdir -p zips && \
-    zip -r zips/ufc_backup_${current_date}.zip UFC/Scraping/data/ && \
+    zip -rq zips/ufc_backup_${current_date}.zip UFC/Scraping/data/ && \
     echo 'UFC backup created on durrrrr'"
 
 ### Unzip UFC Data ###
 current_date=$(date +%b_%d_%y | tr '[:lower:]' '[:upper:]')
 rsync -av durrrrr:~/odds-monitoring/zips/ zips/
 mkdir -p UFC/Scraping/data
-unzip -o zips/ufc_backup_${current_date}.zip "UFC/Scraping/data/*" -d ./
+unzip -oq zips/ufc_backup_${current_date}.zip "UFC/Scraping/data/*" -d ./
 echo "Restored: UFC/Scraping/data/"
 
 ### PROCESS ODDS DATA AND COPY TO SWIFT APP & STREAMLIT
