@@ -166,6 +166,58 @@ class SupabaseOddsPublisherTests(unittest.TestCase):
             ],
         )
 
+    def test_preserves_source_and_sherdog_fighter_identity_columns(self):
+        module = load_module()
+        dataframe = pd.DataFrame(
+            [
+                {
+                    "Event": "UFC 320: Example MAY 26\n12",
+                    "Event_URL": "https://fightodds.io/odds/ufc-320-example",
+                    "FightOdds_Fight_ID": "fight-123",
+                    "FightOdds_Fighter_ID": "fighter-456",
+                    "Sherdog_Fighter_ID": "229309",
+                    "Sherdog_Fighter_URL": "https://www.sherdog.com/fighter/Tommy-McMillen-229309",
+                    "Fighters": "Tommy McMillen",
+                    "draftkings": "-150",
+                }
+            ]
+        )
+
+        rows = module.rows_from_dataframe(
+            dataframe,
+            source_file="ufc_odds_fightoddsio_20260526_1953.csv",
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["source_fighter_id"], "fighter-456")
+        self.assertEqual(rows[0]["sherdog_fighter_id"], "229309")
+        self.assertEqual(rows[0]["fighter_identity_key"], "sherdog:229309")
+        self.assertEqual(rows[0]["fighter"], "Tommy McMillen")
+
+    def test_derives_sherdog_identity_from_profile_url_when_id_is_missing(self):
+        module = load_module()
+        dataframe = pd.DataFrame(
+            [
+                {
+                    "Event": "UFC 320: Example MAY 26\n12",
+                    "FightOdds_Fight_ID": "fight-123",
+                    "FightOdds_Fighter_ID": "fighter-456",
+                    "Sherdog_Fighter_ID": "",
+                    "Sherdog_Fighter_URL": "https://www.sherdog.com/fighter/Tommy-McMillen-229309",
+                    "Fighters": "Tommy McMillen",
+                    "draftkings": "-150",
+                }
+            ]
+        )
+
+        rows = module.rows_from_dataframe(
+            dataframe,
+            source_file="ufc_odds_fightoddsio_20260526_1953.csv",
+        )
+
+        self.assertEqual(rows[0]["sherdog_fighter_id"], "229309")
+        self.assertEqual(rows[0]["fighter_identity_key"], "sherdog:229309")
+
     def test_preserves_future_fight_rows_with_same_fighter_and_different_fight_ids(self):
         module = load_module()
         dataframe = pd.DataFrame(
@@ -306,6 +358,109 @@ class SupabaseOddsPublisherTests(unittest.TestCase):
         )
         self.assertIn("Bearer service-key", session.posts[0]["headers"]["Authorization"])
         self.assertIn("resolution=merge-duplicates", session.posts[0]["headers"]["Prefer"])
+
+    def test_publish_rows_seeds_fighter_maps_and_source_fight_before_odds(self):
+        module = load_module()
+        session = FakeSession()
+        config = module.SupabaseConfig(
+            url="https://example.supabase.co/",
+            service_role_key="service-key",
+        )
+        rows = [
+            {
+                "source": "fightoddsio",
+                "market": "moneyline",
+                "source_file": "latest.csv",
+                "scraped_at": "2026-05-26T19:53:00+00:00",
+                "event_name": "UFC 320",
+                "source_event_id": "9103",
+                "fight_id": "fight-a",
+                "fighter": "Tommy McMillen",
+                "source_fighter_id": "fighter-tommy",
+                "sherdog_fighter_id": "229309",
+                "fighter_identity_key": "sherdog:229309",
+                "sportsbook": "draftkings",
+                "odds_american": -150,
+            },
+            {
+                "source": "fightoddsio",
+                "market": "moneyline",
+                "source_file": "latest.csv",
+                "scraped_at": "2026-05-26T19:53:00+00:00",
+                "event_name": "UFC 320",
+                "source_event_id": "9103",
+                "fight_id": "fight-a",
+                "fighter": "Alberto Montes",
+                "source_fighter_id": "fighter-alberto",
+                "sherdog_fighter_id": "257203",
+                "fighter_identity_key": "sherdog:257203",
+                "sportsbook": "draftkings",
+                "odds_american": 130,
+            },
+        ]
+
+        module.publish_rows(config, rows, session=session, dry_run=False)
+
+        self.assertEqual(
+            [post["url"].rsplit("/", 1)[-1] for post in session.posts],
+            [
+                "ufc_fighters",
+                "ufc_fighter_source_map",
+                "ufc_source_fights",
+                "ufc_odds_history",
+                "ufc_odds_ingest_runs",
+            ],
+        )
+        self.assertEqual(session.posts[0]["json"][0]["sherdog_fighter_id"], 229309)
+        self.assertEqual(session.posts[1]["json"][0]["resolution_status"], "resolved")
+        self.assertEqual(session.posts[2]["json"][0]["resolution_status"], "resolved")
+
+    def test_publish_rows_preserves_existing_seen_order_on_source_map_upsert(self):
+        module = load_module()
+        session = FakeSession(
+            get_payloads=[
+                [
+                    {
+                        "source": "fightoddsio",
+                        "source_fighter_id": "fighter-tommy",
+                        "sherdog_fighter_id": 229309,
+                        "resolution_status": "resolved",
+                        "first_seen_at": "2026-05-26T09:00:00+00:00",
+                        "last_seen_at": "2026-05-26T10:30:00+00:00",
+                    }
+                ]
+            ]
+        )
+        config = module.SupabaseConfig(
+            url="https://example.supabase.co/",
+            service_role_key="service-key",
+        )
+        rows = [
+            {
+                "source": "fightoddsio",
+                "market": "moneyline",
+                "source_file": "latest.csv",
+                "scraped_at": "2026-05-26T10:00:00+00:00",
+                "event_name": "UFC 320",
+                "source_event_id": "9103",
+                "fight_id": "fight-a",
+                "fighter": "Tommy McMillen",
+                "source_fighter_id": "fighter-tommy",
+                "sherdog_fighter_id": "229309",
+                "fighter_identity_key": "sherdog:229309",
+                "sportsbook": "draftkings",
+                "odds_american": -150,
+            }
+        ]
+
+        module.publish_rows(config, rows, session=session, dry_run=False)
+
+        source_map_post = next(
+            post for post in session.posts if post["url"].endswith("/ufc_fighter_source_map")
+        )
+        payload = source_map_post["json"][0]
+        self.assertEqual(payload["first_seen_at"], "2026-05-26T09:00:00+00:00")
+        self.assertEqual(payload["last_seen_at"], "2026-05-26T10:30:00+00:00")
 
     def test_publish_line_rows_extends_active_segments_and_inserts_changes(self):
         module = load_module()

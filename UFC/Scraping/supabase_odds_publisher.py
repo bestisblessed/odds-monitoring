@@ -17,11 +17,24 @@ DEFAULT_LATEST_TABLE = "ufc_latest_odds"
 DEFAULT_HISTORY_TABLE = "ufc_odds_history"
 DEFAULT_LINE_HISTORY_TABLE = "ufc_odds_line_history"
 DEFAULT_INGEST_TABLE = "ufc_odds_ingest_runs"
+DEFAULT_FIGHTERS_TABLE = "ufc_fighters"
+DEFAULT_FIGHTER_SOURCE_MAP_TABLE = "ufc_fighter_source_map"
+DEFAULT_SOURCE_FIGHTS_TABLE = "ufc_source_fights"
 LATEST_ON_CONFLICT = "source,market,event_name,fight_id,fighter,sportsbook"
 HISTORY_ON_CONFLICT = "source,market,source_file,event_name,fight_id,fighter,sportsbook"
 LINE_ON_CONFLICT = "source,market,event_name,fight_id,fighter,sportsbook,valid_from"
-LINE_KEY_COLUMNS = ("source", "market", "event_name", "fight_id", "fighter", "sportsbook")
-BASE_COLUMNS = {"Event", "Event_URL", "FightOdds_Fight_ID", "Fighters"}
+LINE_KEY_COLUMNS = ("source", "market", "event_name", "fight_id", "sportsbook")
+BASE_COLUMNS = {
+    "Event",
+    "Event_URL",
+    "FightOdds_Event_ID",
+    "FightOdds_Fight_ID",
+    "FightOdds_Fighter_ID",
+    "Sherdog_Fighter_ID",
+    "Sherdog_Fighter_URL",
+    "Fighter_Identity_Key",
+    "Fighters",
+}
 
 SCHEMA_SQL = """
 create table if not exists public.ufc_odds_history (
@@ -30,9 +43,13 @@ create table if not exists public.ufc_odds_history (
     source_file text not null,
     event_name text not null,
     fight_id text not null default '',
+    source_event_id text,
     event_raw text,
     event_url text,
     fighter text not null,
+    source_fighter_id text not null default '',
+    sherdog_fighter_id bigint,
+    fighter_identity_key text not null default '',
     sportsbook text not null,
     odds_american integer not null,
     scraped_at timestamptz not null,
@@ -46,9 +63,13 @@ create table if not exists public.ufc_latest_odds (
     market text not null,
     event_name text not null,
     fight_id text not null default '',
+    source_event_id text,
     event_raw text,
     event_url text,
     fighter text not null,
+    source_fighter_id text not null default '',
+    sherdog_fighter_id bigint,
+    fighter_identity_key text not null default '',
     sportsbook text not null,
     odds_american integer not null,
     scraped_at timestamptz not null,
@@ -62,9 +83,13 @@ create table if not exists public.ufc_odds_line_history (
     market text not null,
     event_name text not null,
     fight_id text not null default '',
+    source_event_id text,
     event_raw text,
     event_url text,
     fighter text not null,
+    source_fighter_id text not null default '',
+    sherdog_fighter_id bigint,
+    fighter_identity_key text not null default '',
     sportsbook text not null,
     odds_american integer not null,
     valid_from timestamptz not null,
@@ -84,6 +109,42 @@ drop constraint if exists ufc_latest_odds_pkey;
 
 alter table public.ufc_latest_odds
 add primary key (source, market, event_name, fight_id, fighter, sportsbook);
+
+alter table public.ufc_odds_history
+add column if not exists source_event_id text;
+
+alter table public.ufc_odds_history
+add column if not exists source_fighter_id text not null default '';
+
+alter table public.ufc_odds_history
+add column if not exists sherdog_fighter_id bigint;
+
+alter table public.ufc_odds_history
+add column if not exists fighter_identity_key text not null default '';
+
+alter table public.ufc_latest_odds
+add column if not exists source_event_id text;
+
+alter table public.ufc_latest_odds
+add column if not exists source_fighter_id text not null default '';
+
+alter table public.ufc_latest_odds
+add column if not exists sherdog_fighter_id bigint;
+
+alter table public.ufc_latest_odds
+add column if not exists fighter_identity_key text not null default '';
+
+alter table public.ufc_odds_line_history
+add column if not exists source_event_id text;
+
+alter table public.ufc_odds_line_history
+add column if not exists source_fighter_id text not null default '';
+
+alter table public.ufc_odds_line_history
+add column if not exists sherdog_fighter_id bigint;
+
+alter table public.ufc_odds_line_history
+add column if not exists fighter_identity_key text not null default '';
 
 create table if not exists public.ufc_odds_ingest_runs (
     id uuid primary key default gen_random_uuid(),
@@ -141,11 +202,20 @@ grant all on public.ufc_odds_ingest_runs to service_role;
 create index if not exists idx_ufc_odds_history_fighter_scraped_at
 on public.ufc_odds_history (fighter, scraped_at);
 
+create index if not exists idx_ufc_odds_history_sherdog_fighter_scraped_at
+on public.ufc_odds_history (sherdog_fighter_id, scraped_at);
+
+create index if not exists idx_ufc_latest_odds_sherdog_fighter
+on public.ufc_latest_odds (sherdog_fighter_id);
+
 create index if not exists idx_ufc_odds_history_source_file
 on public.ufc_odds_history (source_file);
 
 create index if not exists idx_ufc_odds_line_history_fighter_valid_from
 on public.ufc_odds_line_history (fighter, valid_from);
+
+create index if not exists idx_ufc_odds_line_history_sherdog_fighter_valid_from
+on public.ufc_odds_line_history (sherdog_fighter_id, valid_from);
 
 create index if not exists idx_ufc_odds_line_history_last_seen_at
 on public.ufc_odds_line_history (last_seen_at);
@@ -163,6 +233,9 @@ class SupabaseConfig:
         line_history_table=DEFAULT_LINE_HISTORY_TABLE,
         latest_table=DEFAULT_LATEST_TABLE,
         ingest_table=DEFAULT_INGEST_TABLE,
+        fighters_table=DEFAULT_FIGHTERS_TABLE,
+        fighter_source_map_table=DEFAULT_FIGHTER_SOURCE_MAP_TABLE,
+        source_fights_table=DEFAULT_SOURCE_FIGHTS_TABLE,
         timeout=30,
     ):
         self.url = (url or "").rstrip("/")
@@ -171,6 +244,9 @@ class SupabaseConfig:
         self.line_history_table = line_history_table
         self.latest_table = latest_table
         self.ingest_table = ingest_table
+        self.fighters_table = fighters_table
+        self.fighter_source_map_table = fighter_source_map_table
+        self.source_fights_table = source_fights_table
         self.timeout = timeout
 
 
@@ -230,6 +306,54 @@ def clean_text(value):
     return str(value).strip()
 
 
+def quote_postgrest_value(value):
+    text = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{text}"'
+
+
+def sherdog_id_from_url(value):
+    """Extract the stable numeric Sherdog ID from a fighter profile URL."""
+    url = clean_text(value)
+    match = re.search(r"/fighter/[^/?#]*-(\d+)(?:[/?#]|$)", url)
+    return match.group(1) if match else ""
+
+
+def fighter_identity_fields(raw_row):
+    """Return source and canonical IDs without changing the source display name."""
+    source_fighter_id = clean_text(raw_row.get("FightOdds_Fighter_ID"))
+    sherdog_fighter_id = clean_text(raw_row.get("Sherdog_Fighter_ID"))
+    sherdog_fighter_url = clean_text(raw_row.get("Sherdog_Fighter_URL"))
+    if not sherdog_fighter_id:
+        sherdog_fighter_id = sherdog_id_from_url(sherdog_fighter_url)
+
+    identity_key = clean_text(raw_row.get("Fighter_Identity_Key"))
+    if not identity_key:
+        if sherdog_fighter_id:
+            identity_key = f"sherdog:{sherdog_fighter_id}"
+        elif source_fighter_id:
+            identity_key = f"fightodds:{source_fighter_id}"
+
+    fields = {
+        "source_fighter_id": source_fighter_id,
+        "sherdog_fighter_id": sherdog_fighter_id or None,
+        "fighter_identity_key": identity_key,
+    }
+    return fields if any(fields.values()) else {}
+
+
+def source_event_id_from_row(raw_row):
+    return clean_text(raw_row.get("FightOdds_Event_ID")) or None
+
+
+def normalized_source_name(value):
+    return re.sub(r"[^a-z0-9]+", "", clean_text(value).casefold()) or None
+
+
+def positive_int_or_none(value):
+    text = clean_text(value)
+    return int(text) if text.isdigit() and int(text) > 0 else None
+
+
 def is_sportsbook_column(column_name):
     if column_name in BASE_COLUMNS:
         return False
@@ -251,6 +375,9 @@ def rows_from_dataframe(dataframe, source_file, scraped_at=None):
         event_name = event_raw.splitlines()[0].strip()
         event_url = clean_text(raw_row.get("Event_URL")) or None
         fight_id = clean_text(raw_row.get("FightOdds_Fight_ID"))
+        source_event_id = source_event_id_from_row(raw_row)
+        source_event_fields = {"source_event_id": source_event_id} if source_event_id else {}
+        identity_fields = fighter_identity_fields(raw_row)
 
         for sportsbook in sportsbook_columns:
             odds_american = parse_american_odds(raw_row.get(sportsbook))
@@ -263,9 +390,11 @@ def rows_from_dataframe(dataframe, source_file, scraped_at=None):
                     "market": "moneyline",
                     "event_name": event_name,
                     "fight_id": fight_id,
+                    **source_event_fields,
                     "event_raw": event_raw,
                     "event_url": event_url,
                     "fighter": fighter,
+                    **identity_fields,
                     "sportsbook": sportsbook,
                     "odds_american": odds_american,
                     "scraped_at": scraped_at,
@@ -302,6 +431,9 @@ def iter_rows_from_csv(csv_path):
                 event_name = event_raw.splitlines()[0].strip()
                 event_url = clean_text(raw_row.get("Event_URL")) or None
                 fight_id = clean_text(raw_row.get("FightOdds_Fight_ID"))
+                source_event_id = source_event_id_from_row(raw_row)
+                source_event_fields = {"source_event_id": source_event_id} if source_event_id else {}
+                identity_fields = fighter_identity_fields(raw_row)
 
                 for sportsbook in sportsbook_columns:
                     odds_american = parse_american_odds(raw_row.get(sportsbook))
@@ -313,9 +445,11 @@ def iter_rows_from_csv(csv_path):
                         "market": "moneyline",
                         "event_name": event_name,
                         "fight_id": fight_id,
+                        **source_event_fields,
                         "event_raw": event_raw,
                         "event_url": event_url,
                         "fighter": fighter,
+                        **identity_fields,
                         "sportsbook": sportsbook,
                         "odds_american": odds_american,
                         "scraped_at": scraped_at,
@@ -404,7 +538,11 @@ def history_key(row):
 
 
 def line_key(row):
-    return tuple(row.get(column, "") for column in LINE_KEY_COLUMNS)
+    # Keep in-memory compaction aligned with the live table's current primary
+    # key. The stable identity is still persisted on every new row; switching
+    # the database conflict key requires the separate post-backfill unique-index
+    # migration so legacy raw-name rows cannot collide during dual-write.
+    return tuple(row.get(column, "") for column in LINE_KEY_COLUMNS) + (row.get("fighter") or "",)
 
 
 def line_segment_from_row(row, valid_from=None, last_seen_at=None, first_source_file=None, last_source_file=None):
@@ -415,9 +553,13 @@ def line_segment_from_row(row, valid_from=None, last_seen_at=None, first_source_
         "market": row.get("market", "moneyline"),
         "event_name": row.get("event_name", ""),
         "fight_id": row.get("fight_id", ""),
+        "source_event_id": row.get("source_event_id"),
         "event_raw": row.get("event_raw"),
         "event_url": row.get("event_url"),
         "fighter": row.get("fighter", ""),
+        "source_fighter_id": row.get("source_fighter_id", ""),
+        "sherdog_fighter_id": row.get("sherdog_fighter_id"),
+        "fighter_identity_key": row.get("fighter_identity_key", ""),
         "sportsbook": row.get("sportsbook", ""),
         "odds_american": row.get("odds_american"),
         "valid_from": valid_from or scraped_at,
@@ -456,7 +598,8 @@ def fetch_active_line_rows(session, config, last_seen_at, page_size=1000):
             config.line_history_table,
             {
                 "select": (
-                    "source,market,event_name,fight_id,event_raw,event_url,fighter,sportsbook,"
+                    "source,market,event_name,fight_id,source_event_id,event_raw,event_url,fighter,sportsbook,"
+                    "source_fighter_id,sherdog_fighter_id,fighter_identity_key,"
                     "odds_american,valid_from,last_seen_at,first_source_file,last_source_file"
                 ),
                 "source": "eq.fightoddsio",
@@ -547,6 +690,187 @@ def build_publish_result(dry_run, rows, csv_paths, history_table, ingest_table, 
     return result
 
 
+def identity_payloads_from_rows(rows):
+    """Build parent-table payloads required before odds rows reference Sherdog IDs."""
+    fighters = {}
+    source_maps = {}
+    fights = {}
+
+    for row in rows:
+        source = clean_text(row.get("source")) or "fightoddsio"
+        source_fighter_id = clean_text(row.get("source_fighter_id"))
+        fighter_name = clean_text(row.get("fighter"))
+        sherdog_fighter_id = positive_int_or_none(row.get("sherdog_fighter_id"))
+        scraped_at = row.get("scraped_at")
+        observed_at = scraped_at or datetime.now(timezone.utc).isoformat()
+
+        if sherdog_fighter_id and fighter_name:
+            fighters.setdefault(
+                sherdog_fighter_id,
+                {
+                    "sherdog_fighter_id": sherdog_fighter_id,
+                    "canonical_name": fighter_name,
+                },
+            )
+
+        if source_fighter_id and fighter_name:
+            map_key = (source, source_fighter_id)
+            map_payload = {
+                "source": source,
+                "source_fighter_id": source_fighter_id,
+                "sherdog_fighter_id": sherdog_fighter_id,
+                "source_fighter_name": fighter_name,
+                "normalized_source_name": normalized_source_name(fighter_name),
+                "resolution_method": "source_sherdog_id" if sherdog_fighter_id else None,
+                "resolution_status": "resolved" if sherdog_fighter_id else "unresolved",
+                # Source timestamps can precede the publisher's insert time.
+                # Set both timestamps from the observation so the database's
+                # seen-order constraint remains valid for newly discovered IDs.
+                "first_seen_at": observed_at,
+                "last_seen_at": observed_at,
+            }
+            existing_map = source_maps.get(map_key)
+            if existing_map and existing_map["sherdog_fighter_id"] != sherdog_fighter_id:
+                raise ValueError(
+                    f"Conflicting Sherdog IDs for {source} fighter {source_fighter_id}: "
+                    f"{existing_map['sherdog_fighter_id']} vs {sherdog_fighter_id}"
+                )
+            source_maps[map_key] = map_payload
+
+        source_event_id = clean_text(row.get("source_event_id"))
+        fight_id = clean_text(row.get("fight_id"))
+        event_name = clean_text(row.get("event_name"))
+        if source_event_id and fight_id and event_name and source_fighter_id and fighter_name:
+            fight_key = (source, fight_id)
+            fight = fights.setdefault(
+                fight_key,
+                {
+                    "source": source,
+                    "source_event_id": source_event_id,
+                    "fight_id": fight_id,
+                    "event_name": event_name,
+                    "event_url": row.get("event_url"),
+                    "fighters": {},
+                },
+            )
+            if fight["source_event_id"] != source_event_id:
+                raise ValueError(f"Conflicting source event IDs for {source} fight {fight_id}")
+            existing_fighter = fight["fighters"].get(source_fighter_id)
+            candidate = {"name": fighter_name, "sherdog_fighter_id": sherdog_fighter_id}
+            if existing_fighter and existing_fighter != candidate:
+                raise ValueError(
+                    f"Conflicting fighter metadata for {source} fight {fight_id} fighter {source_fighter_id}"
+                )
+            fight["fighters"][source_fighter_id] = candidate
+
+    source_fights = []
+    for fight in fights.values():
+        fighters_by_id = list(fight["fighters"].items())
+        if len(fighters_by_id) != 2:
+            continue
+        (fighter_1_id, fighter_1), (fighter_2_id, fighter_2) = fighters_by_id
+        fighter_1_sherdog_id = fighter_1["sherdog_fighter_id"]
+        fighter_2_sherdog_id = fighter_2["sherdog_fighter_id"]
+        resolved = (
+            fighter_1_sherdog_id is not None
+            and fighter_2_sherdog_id is not None
+            and fighter_1_sherdog_id != fighter_2_sherdog_id
+        )
+        source_fights.append(
+            {
+                "source": fight["source"],
+                "source_event_id": fight["source_event_id"],
+                "fight_id": fight["fight_id"],
+                "event_name": fight["event_name"],
+                "event_url": fight["event_url"],
+                "source_fighter_1_id": fighter_1_id,
+                "source_fighter_1_name": fighter_1["name"],
+                "fighter_1_sherdog_id": fighter_1_sherdog_id,
+                "source_fighter_2_id": fighter_2_id,
+                "source_fighter_2_name": fighter_2["name"],
+                "fighter_2_sherdog_id": fighter_2_sherdog_id,
+                "resolution_status": "resolved" if resolved else "unresolved",
+            }
+        )
+
+    return list(fighters.values()), list(source_maps.values()), source_fights
+
+
+def publish_identity_rows(config, rows, session, chunk_size):
+    fighters, source_maps, source_fights = identity_payloads_from_rows(rows)
+    source_ids = sorted({payload["source_fighter_id"] for payload in source_maps})
+    existing_maps = {}
+    if source_ids:
+        existing_rows = get_rest(
+            session,
+            config,
+            config.fighter_source_map_table,
+            {
+                "select": "source,source_fighter_id,sherdog_fighter_id,resolution_status,first_seen_at,last_seen_at",
+                "source": "eq.fightoddsio",
+                "source_fighter_id": f"in.({','.join(quote_postgrest_value(value) for value in source_ids)})",
+                "limit": str(len(source_ids)),
+            },
+        )
+        existing_maps = {
+            (row.get("source", ""), row.get("source_fighter_id", "")): row
+            for row in existing_rows
+        }
+        for payload in source_maps:
+            existing = existing_maps.get((payload["source"], payload["source_fighter_id"]))
+            if not existing:
+                continue
+            old_id = positive_int_or_none(existing.get("sherdog_fighter_id"))
+            new_id = positive_int_or_none(payload.get("sherdog_fighter_id"))
+            if old_id is not None and new_id is not None and old_id != new_id:
+                raise ValueError(
+                    f"Refusing to remap {payload['source']} fighter {payload['source_fighter_id']} "
+                    f"from Sherdog {old_id} to {new_id}. Review the source mapping first."
+                )
+            if old_id is not None and new_id is None:
+                payload["sherdog_fighter_id"] = old_id
+                payload["resolution_status"] = "resolved"
+                payload["resolution_method"] = existing.get("resolution_method") or "reviewed_alias"
+            # Include the existing first-seen value in the upsert payload.
+            # Postgres validates CHECK constraints on the proposed row before
+            # resolving an ON CONFLICT update; omitting this field would apply
+            # its `now()` default and can make an older last_seen_at invalid.
+            existing_first_seen = existing.get("first_seen_at")
+            if existing_first_seen:
+                payload["first_seen_at"] = existing_first_seen
+            existing_last_seen = existing.get("last_seen_at")
+            if existing_last_seen and payload.get("last_seen_at") < existing_last_seen:
+                payload["last_seen_at"] = existing_last_seen
+
+    for batch in chunked(fighters, chunk_size):
+        post_rest(
+            session,
+            config,
+            config.fighters_table,
+            batch,
+            params={"on_conflict": "sherdog_fighter_id"},
+            prefer="resolution=merge-duplicates,return=minimal",
+        )
+    for batch in chunked(source_maps, chunk_size):
+        post_rest(
+            session,
+            config,
+            config.fighter_source_map_table,
+            batch,
+            params={"on_conflict": "source,source_fighter_id"},
+            prefer="resolution=merge-duplicates,return=minimal",
+        )
+    for batch in chunked(source_fights, chunk_size):
+        post_rest(
+            session,
+            config,
+            config.source_fights_table,
+            batch,
+            params={"on_conflict": "source,fight_id"},
+            prefer="resolution=merge-duplicates,return=minimal",
+        )
+
+
 def publish_rows(
     config,
     rows,
@@ -576,6 +900,7 @@ def publish_rows(
         raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for live publish.")
 
     session = session or requests.Session()
+    publish_identity_rows(config, rows, session, chunk_size)
     for batch in chunked(rows, chunk_size):
         post_rest(
             session,
@@ -613,6 +938,7 @@ def publish_line_rows(
         if not config.url or not config.service_role_key:
             raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for live publish.")
         session = session or requests.Session()
+        publish_identity_rows(config, rows, session, chunk_size)
         previous_seen_at = latest_line_seen_at(session, config)
         active_rows = fetch_active_line_rows(session, config, previous_seen_at)
         line_build = build_line_segments_for_snapshot(rows, active_rows=active_rows)

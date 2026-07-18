@@ -2,6 +2,7 @@
 Produces the same CSV format as ufc.py for compatibility with the monitoring script.
 """
 import os
+import re
 import requests
 import pandas as pd
 from datetime import datetime
@@ -72,8 +73,8 @@ def fetch_event_odds(pk):
         fightOffers {
           edges {
             node {
-              fighter1 { firstName lastName }
-              fighter2 { firstName lastName }
+              fighter1 { id firstName lastName sherdogId sherdogUrl }
+              fighter2 { id firstName lastName sherdogId sherdogUrl }
               fight { id slug }
               isCancelled
               straightOffers {
@@ -122,6 +123,35 @@ def is_target_event(event):
     return False
 
 
+def sherdog_id_from_url(value):
+    """Recover the stable Sherdog ID when FightOdds only returns a profile URL."""
+    match = re.search(r"/fighter/[^/?#]*-(\d+)(?:[/?#]|$)", str(value or ""))
+    return match.group(1) if match else ""
+
+
+def fighter_identity_columns(fighter):
+    """Build CSV identity fields while preserving FightOdds' raw display name."""
+    source_fighter_id = str(fighter.get("id") or "").strip()
+    sherdog_fighter_id = str(fighter.get("sherdogId") or "").strip()
+    sherdog_fighter_url = str(fighter.get("sherdogUrl") or "").strip()
+    if not sherdog_fighter_id:
+        sherdog_fighter_id = sherdog_id_from_url(sherdog_fighter_url)
+
+    if sherdog_fighter_id:
+        identity_key = f"sherdog:{sherdog_fighter_id}"
+    elif source_fighter_id:
+        identity_key = f"fightodds:{source_fighter_id}"
+    else:
+        identity_key = ""
+
+    return {
+        "FightOdds_Fighter_ID": source_fighter_id,
+        "Sherdog_Fighter_ID": sherdog_fighter_id,
+        "Sherdog_Fighter_URL": sherdog_fighter_url,
+        "Fighter_Identity_Key": identity_key,
+    }
+
+
 def scrape_fightodds_v2():
     """Scrape all target events via the GraphQL API and return a DataFrame."""
     events = fetch_upcoming_events()
@@ -143,6 +173,7 @@ def scrape_fightodds_v2():
         event_data = fetch_event_odds(event["pk"])
         if not event_data:
             continue
+        source_event_id = str(event_data.get("pk") or event["pk"])
 
         formatted_name = format_event_name(
             event_name, event["date"], event["straightOfferCount"]
@@ -175,15 +206,19 @@ def scrape_fightodds_v2():
             all_rows.append({
                 "Event": formatted_name,
                 "Event_URL": event_url,
+                "FightOdds_Event_ID": source_event_id,
                 "FightOdds_Fight_ID": fight_id,
                 "Fighters": fighter1_name,
+                **fighter_identity_columns(f1),
                 **fighter1_odds,
             })
             all_rows.append({
                 "Event": formatted_name,
                 "Event_URL": event_url,
+                "FightOdds_Event_ID": source_event_id,
                 "FightOdds_Fight_ID": fight_id,
                 "Fighters": fighter2_name,
+                **fighter_identity_columns(f2),
                 **fighter2_odds,
             })
 
@@ -196,7 +231,17 @@ def scrape_fightodds_v2():
             df[sb] = ""
     df = df.fillna("")
 
-    first_cols = ["Event", "Event_URL", "FightOdds_Fight_ID", "Fighters"]
+    first_cols = [
+        "Event",
+        "Event_URL",
+        "FightOdds_Event_ID",
+        "FightOdds_Fight_ID",
+        "FightOdds_Fighter_ID",
+        "Sherdog_Fighter_ID",
+        "Sherdog_Fighter_URL",
+        "Fighter_Identity_Key",
+        "Fighters",
+    ]
     other_cols = [col for col in df.columns if col not in first_cols]
     df = df[first_cols + other_cols]
 
