@@ -166,6 +166,14 @@ def is_valid_odds(value):
     odds_pattern = re.compile(r'^[+-]?\d+$')
     return bool(odds_pattern.match(value_str))
 
+
+def is_odds_metadata_column(column_name):
+    normalized = normalize_text(column_name).lower()
+    return (
+        normalized in {"event", "event_url", "fighters", "fighter1", "fighter2"}
+        or normalized.endswith(("_id", "_identity_key"))
+    )
+
 def clean_fight_id_from_file(fight_id):
     """Normalize legacy fight IDs from file into a simplified token.
     This attempts to handle previous prefixes like 'fightodds_' and 'vsin_'
@@ -289,7 +297,7 @@ def process_fightodds_new_fights(file_path, seen_fights):
                 first_book = None
                 for key, value in row.items():
                     if (
-                        key not in ['Fighters', 'Event']
+                        not is_odds_metadata_column(key)
                         and not is_excluded_sportsbook(key)
                         and is_valid_odds(value)
                     ):

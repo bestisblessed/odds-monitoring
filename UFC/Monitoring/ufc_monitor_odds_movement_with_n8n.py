@@ -118,10 +118,17 @@ def is_sportsbook_url_column(column_name):
         return False
     return normalized.endswith(("_url", "_direct_url", "_link", "_direct_link"))
 
-def is_odds_column(column_name):
+def is_odds_metadata_column(column_name):
     normalized = normalize_text(column_name).lower()
     return (
-        normalized not in ODDS_METADATA_COLUMNS
+        normalized in ODDS_METADATA_COLUMNS
+        or normalized.endswith(("_id", "_identity_key"))
+    )
+
+
+def is_odds_column(column_name):
+    return (
+        not is_odds_metadata_column(column_name)
         and not is_sportsbook_url_column(column_name)
         and not is_excluded_sportsbook(column_name)
     )
