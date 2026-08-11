@@ -2,6 +2,7 @@ tests/
 !tests/
 tests/**
 !tests/test_supabase_odds_publisher.py
+!tests/test_ufc_odds_data_processing.py
 .codex/
 *log*
 */*log*
