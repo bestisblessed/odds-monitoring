@@ -3,20 +3,20 @@
 ### Zip NFL Data ###
 current_date=$(date +%b_%d_%y | tr '[:lower:]' '[:upper:]')
 mkdir -p zips
-ssh Trinity "cd /home/trinity/odds-monitoring && \
+ssh durrrrr "cd /home/durrrrr/odds-monitoring && \
     mkdir -p zips && \
     zip -r zips/nfl_backup_${current_date}.zip NFL/Scraping/data/ && \
-    echo 'NFL backup created on Trinity'"
+    echo 'NFL backup created on durrrrr'"
 
 ### Unzip NFL Data ###
 current_date=$(date +%b_%d_%y | tr '[:lower:]' '[:upper:]')
-rsync -av Trinity:/home/trinity/odds-monitoring/zips/ zips/
+rsync -av durrrrr:/home/durrrrr/odds-monitoring/zips/ zips/
 mkdir -p NFL/Scraping/data
 unzip -o zips/nfl_backup_${current_date}.zip "NFL/Scraping/data/*" -d ./
 echo "Restored: NFL/Scraping/data/"
 
 # DELETE REMOTE NFL ODDS DATA FILES
-#ssh Trinity "rm -rf /home/trinity/odds-monitoring/NFL/Scraping/data/* && echo 'Cleared NFL data files on Trinity'" 
+#ssh durrrrr "rm -rf /home/durrrrr/odds-monitoring/NFL/Scraping/data/* && echo 'Cleared NFL data files on durrrrr'"
 
 cd /Users/td/Code/odds-monitoring/NFL/Analysis 
 python nfl_odds_data_processing.py
