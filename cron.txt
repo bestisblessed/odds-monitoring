@@ -2,6 +2,7 @@
 ### v2 ###
 export HOME=/home/durrrrr
 */10 * * * * /home/durrrrr/Stuff/opsdash-cron-run "NFL Odds Scraper" /home/durrrrr/odds-monitoring/NFL/cron.log -- /usr/bin/flock -n /tmp/nfl_odds.lockfile /bin/bash -lc '/home/durrrrr/odds-monitoring/NFL/run_scraper.sh'
+0 12 * * * /home/durrrrr/Stuff/opsdash-cron-run "NFL Injury Reports" /home/durrrrr/odds-monitoring/NFL/injury_reports.log -- /usr/bin/flock -n /tmp/nfl_injury_reports.lockfile /home/durrrrr/.pyenv/shims/python /home/durrrrr/odds-monitoring/NFL/Scraping/nfl_injury_reports.py
 2-59/3 * * * * $HOME/.pyenv/shims/python $HOME/odds-monitoring/ncaaf.py >> $HOME/odds-monitoring/ncaaf.log 2>&1
 3-59/3 * * * * $HOME/.pyenv/shims/python $HOME/odds-monitoring/ufc.py >> $HOME/odds-monitoring/ufc.log 2>&1
 0 12 * * * $HOME/.pyenv/shims/python $HOME/odds-monitoring/nfl_injury_reports.py >> $HOME/odds-monitoring/logs/nfl_injury_reports.log 2>&1
