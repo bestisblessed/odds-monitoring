@@ -5,6 +5,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import pandas as pd
@@ -30,6 +31,7 @@ chrome_options.add_experimental_option("prefs", {
 
 service = Service(chromedriver_path)
 driver = webdriver.Chrome(service=service, options=chrome_options)
+driver.set_page_load_timeout(30)
 
 
 def _cleanup_driver():
@@ -44,7 +46,10 @@ atexit.register(_cleanup_driver)
 
 try:
     url = 'https://www.espn.com/nfl/injuries'
-    driver.get(url)
+    try:
+        driver.get(url)
+    except TimeoutException:
+        print("ESPN page load timed out; continuing with the loaded document.")
     wait = WebDriverWait(driver, 10)
     wait.until(EC.presence_of_element_located((By.CLASS_NAME, "ResponsiveTable")))
     tables = driver.find_elements(By.CLASS_NAME, "ResponsiveTable")
