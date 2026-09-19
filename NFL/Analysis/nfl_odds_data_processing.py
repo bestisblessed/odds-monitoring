@@ -1,179 +1,208 @@
+import argparse
+import csv
+import glob
+import json
 import os
 import re
-import json
-import csv
-import pandas as pd
-from datetime import datetime
 import shutil
+from datetime import datetime, timedelta
 
-shutil.copytree('../Scraping/data', 'data', dirs_exist_ok=True)
+import pandas as pd
 
-files = os.listdir('data/odds/')
-for file in files:
-    file_path = os.path.join('data/odds/', file)
-    if os.path.isfile(file_path) and os.stat(file_path).st_size == 0:
-        print(f"Deleting empty file: {file}")
-        os.remove(file_path)
+
+RAW_PATTERN = re.compile(r"nfl_odds_vsin_\d{8}_\d{4}\.json$")
+IGNORED_COLUMNS = {"SPR", "ML", "TOT"}
+BOOK_NAMES = {"CIRCA": "Circa", "CAESARS": "Caesars", "BETMGM": "BetMGM", "DK": "DK"}
+
+
 def load_files(directory):
-    files = [f for f in os.listdir(directory) if re.match(r'nfl_odds_vsin_\d{8}_\d{4}\.json', f)]
-    files.sort(key=lambda x: re.findall(r'(\d{8}_\d{4})', x)[0])
+    files = sorted(
+        (name for name in os.listdir(directory) if RAW_PATTERN.match(name)),
+        key=lambda name: re.findall(r"(\d{8}_\d{4})", name)[0],
+    )
     return files
-def format_odds(odds):
-    return odds.replace("\n", " | ")
-def detect_odds_movement(odds_before, odds_after):
-    movements = []
-    for game_before, game_after in zip(odds_before, odds_after):
-        # Minimal guard around 'Time' to avoid KeyError
-        time_before = game_before.get('Time')
-        if time_before is None:
-            time_before = next((game_before[k] for k in game_before if isinstance(k, str) and k.strip().lower() == 'time'), None)
-        time_after = game_after.get('Time')
-        if time_after is None:
-            time_after = next((game_after[k] for k in game_after if isinstance(k, str) and k.strip().lower() == 'time'), None)
 
-        if time_before is None or time_after is None:
+
+def _compact(value):
+    return " ".join(str(value or "").split())
+
+
+def _time_from_marker(value):
+    match = re.search(r"(\d{1,2}:\d{2}\s*[AP]M(?:\s+ET)?)", str(value), re.I)
+    return _compact(match.group(1)) if match else None
+
+
+def _game_key(game_date, game_time, team1, team2):
+    teams = tuple(sorted((_compact(team1).casefold(), _compact(team2).casefold())))
+    return (_compact(game_date).casefold(), _compact(game_time).casefold(), *teams)
+
+
+def _normalize_triplets(snapshot):
+    games = {}
+    index = 0
+    while index + 2 < len(snapshot):
+        marker, team1_row, team2_row = snapshot[index:index + 3]
+        if not marker:
+            index += 1
             continue
+        date_column = next(iter(marker))
+        game_time = _time_from_marker(marker.get(date_column))
+        team1 = _compact(team1_row.get(date_column))
+        team2 = _compact(team2_row.get(date_column))
+        if not game_time or not team1 or not team2 or _time_from_marker(team1) or _time_from_marker(team2):
+            index += 1
+            continue
+        quotes = {}
+        for source in set(team1_row).intersection(team2_row):
+            if source == date_column or source in IGNORED_COLUMNS or source.startswith("Column"):
+                continue
+            before, after = _compact(team1_row.get(source)), _compact(team2_row.get(source))
+            if before or after:
+                quotes[BOOK_NAMES.get(source, source.title())] = f"{before} | {after}"
+        games[_game_key(date_column, game_time, team1, team2)] = {
+            "game_date": date_column, "game_time": game_time,
+            "team1": team1, "team2": team2, "quotes": quotes,
+        }
+        index += 3
+    return games
 
-        if time_before == time_after:
-            game_date_column_name = list(game_before.keys())[1]
-            for key in game_before:
-                if key not in ["Time", game_date_column_name] and key in game_after:
-                    if game_before[key] != game_after[key]:
-                        movements.append({
-                            'game_time': time_before,
-                            'game_date_column_name': game_date_column_name,
-                            'game_date_value': game_before[game_date_column_name],
-                            'sportsbook': key,
-                            'odds_before': format_odds(game_before[key]),
-                            'odds_after': format_odds(game_after[key])
-                        })
+
+def _normalize_legacy(snapshot):
+    games = {}
+    for row in snapshot:
+        time_key = next((key for key in row if str(key).strip().casefold() == "time"), None)
+        if time_key is None:
+            continue
+        game_time = _compact(row.get(time_key))
+        date_column = next((key for key in row if key != time_key), None)
+        if not date_column:
+            continue
+        teams = [part.strip() for part in str(row.get(date_column, "")).split("\n") if part.strip()]
+        if len(teams) < 2:
+            continue
+        team1, team2 = teams[0], teams[-1]
+        quotes = {
+            BOOK_NAMES.get(key, str(key).title()): str(value).replace("\n", " | ")
+            for key, value in row.items()
+            if key not in {time_key, date_column} and value not in (None, "")
+        }
+        games[_game_key(date_column, game_time, team1, team2)] = {
+            "game_date": date_column, "game_time": game_time,
+            "team1": team1, "team2": team2, "quotes": quotes,
+        }
+    return games
+
+
+def normalize_snapshot(snapshot):
+    """Normalize legacy game objects and current time/team/team triplets."""
+    legacy = _normalize_legacy(snapshot)
+    return legacy if legacy else _normalize_triplets(snapshot)
+
+
+def detect_odds_movement(odds_before, odds_after):
+    before_games = normalize_snapshot(odds_before)
+    after_games = normalize_snapshot(odds_after)
+    movements = []
+    quote_changes = 0
+    for identity in sorted(set(before_games).intersection(after_games)):
+        before, after = before_games[identity], after_games[identity]
+        for sportsbook in sorted(set(before["quotes"]).intersection(after["quotes"])):
+            old, new = before["quotes"][sportsbook], after["quotes"][sportsbook]
+            if old != new:
+                quote_changes += 1
+                movements.append({
+                    "game_date": before["game_date"], "game_time": before["game_time"],
+                    "team1": before["team1"], "team2": before["team2"],
+                    "sportsbook": sportsbook, "odds_before": old, "odds_after": new,
+                })
+    if quote_changes and not movements:
+        raise RuntimeError(f"Detected {quote_changes} parseable quote changes but generated zero movement rows")
     return movements
-directory = 'data/odds/'
-files = load_files(directory)
-all_movements = []
-for i in range(len(files) - 1):
-    file1 = files[i]
-    file2 = files[i + 1]
-    with open(os.path.join(directory, file1)) as f1, open(os.path.join(directory, file2)) as f2:
-        odds_before = json.load(f1)
-        odds_after = json.load(f2)
-    odds_movements = detect_odds_movement(odds_before, odds_after)
-    if odds_movements:
-        for movement in odds_movements:
-            all_movements.append({
-                'file1': file1,
-                'file2': file2,
-                'game_date': movement['game_date_column_name'],  
-                'game_time': movement['game_time'],  
-                'matchup': f"{movement['game_date_value'].replace('\n', ' vs').strip()}",
-                'sportsbook': movement['sportsbook'],
-                'odds_before': movement['odds_before'],
-                'odds_after': movement['odds_after']
-            })
-    else:
-        pass
-csv_file_path = 'data/nfl_odds_movements.csv'
-with open(csv_file_path, mode='w', newline='') as csv_file:
-    fieldnames = ['file1', 'file2', 'game_date', 'game_time', 'matchup', 'sportsbook', 'odds_before', 'odds_after']
-    writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
-    writer.writeheader()  
-    for movement in all_movements:
-        writer.writerow(movement)  
-print(f"Odds movements saved to {csv_file_path}")
-file_path = 'data/nfl_odds_movements.csv'  
-nfl_odds_data = pd.read_csv(file_path)
-nfl_odds_data[['team_1', 'team_2']] = nfl_odds_data['matchup'].str.split(' vs ', expand=True)
-nfl_odds_data[['team1_odds_before', 'team2_odds_before']] = nfl_odds_data['odds_before'].str.split(r'\s+\|\s+', expand=True)
-nfl_odds_data[['team1_odds_after', 'team2_odds_after']] = nfl_odds_data['odds_after'].str.split(r'\s+\|\s+', expand=True)
-nfl_odds_data['team1_odds_before'] = nfl_odds_data['team1_odds_before'].str.split().str[0]
-nfl_odds_data['team2_odds_before'] = nfl_odds_data['team2_odds_before'].str.split().str[0]
-nfl_odds_data['team1_odds_after'] = nfl_odds_data['team1_odds_after'].str.split().str[0]
-nfl_odds_data['team2_odds_after'] = nfl_odds_data['team2_odds_after'].str.split().str[0]
+
+
 def extract_timestamp(filename):
     try:
-        timestamp_str = filename.split('_')[-1].replace('.json', '')
-        return datetime.strptime(filename.split('_')[-2] + "_" + timestamp_str, '%Y%m%d_%H%M')
-    except:
+        return datetime.strptime("_".join(filename.removesuffix(".json").split("_")[-2:]), "%Y%m%d_%H%M")
+    except ValueError:
         return None
-nfl_odds_data['time_before'] = nfl_odds_data['file1'].apply(extract_timestamp)
-nfl_odds_data['time_after'] = nfl_odds_data['file2'].apply(extract_timestamp)
-nfl_odds_data['time_before'] = nfl_odds_data['time_before'].apply(lambda dt: dt.strftime('%b %d %-I:%M%p') if pd.notnull(dt) else None)
-nfl_odds_data['time_after'] = nfl_odds_data['time_after'].apply(lambda dt: dt.strftime('%b %d %-I:%M%p') if pd.notnull(dt) else None)
-# nfl_odds_data = nfl_odds_data.drop(columns=['odds_before', 'odds_after', 'file1', 'file2'])
-print(nfl_odds_data[['team_1', 'team_2', 'team1_odds_before', 'team2_odds_before', 'team1_odds_after', 'team2_odds_after']].head())
-nfl_odds_data = nfl_odds_data.map(lambda x: x.strip() if isinstance(x, str) else x)
-nfl_odds_data.to_csv(file_path, index=False)  
-nfl_odds_data = pd.read_csv('data/nfl_odds_movements.csv')
-circa_odds_data = nfl_odds_data[nfl_odds_data['sportsbook'] == 'Circa']
-circa_odds_data = circa_odds_data.map(lambda x: x.strip() if isinstance(x, str) else x)
-circa_odds_data.to_csv('data/nfl_odds_movements_circa.csv', index=False)
-nfl_odds_data = pd.read_csv('data/nfl_odds_movements.csv')
-dk_odds_data = nfl_odds_data[nfl_odds_data['sportsbook'] == 'DK']
-dk_odds_data = dk_odds_data.map(lambda x: x.strip() if isinstance(x, str) else x)
-dk_odds_data.to_csv('data/nfl_odds_movements_dk.csv', index=False)
 
 
+def process_directory(directory, output_path):
+    files = load_files(directory)
+    rows = []
+    normalized_games = 0
+    for file1, file2 in zip(files, files[1:]):
+        with open(os.path.join(directory, file1)) as f1, open(os.path.join(directory, file2)) as f2:
+            before, after = json.load(f1), json.load(f2)
+        normalized_games += len(normalize_snapshot(before)) + len(normalize_snapshot(after))
+        for movement in detect_odds_movement(before, after):
+            rows.append({
+                "file1": file1, "file2": file2,
+                "game_date": movement["game_date"], "game_time": movement["game_time"],
+                "matchup": f"{movement['team1']} vs {movement['team2']}",
+                "sportsbook": movement["sportsbook"],
+                "odds_before": movement["odds_before"], "odds_after": movement["odds_after"],
+            })
+    if len(files) > 1 and normalized_games == 0:
+        raise RuntimeError("No games could be parsed from the supplied odds snapshots")
+    base_columns = ["file1", "file2", "game_date", "game_time", "matchup", "sportsbook", "odds_before", "odds_after"]
+    frame = pd.DataFrame(rows, columns=base_columns)
+    if not frame.empty:
+        frame[["team_1", "team_2"]] = frame["matchup"].str.split(" vs ", n=1, expand=True)
+        frame[["team1_odds_before", "team2_odds_before"]] = frame["odds_before"].str.split(r"\s+\|\s+", n=1, expand=True)
+        frame[["team1_odds_after", "team2_odds_after"]] = frame["odds_after"].str.split(r"\s+\|\s+", n=1, expand=True)
+        for column in ["team1_odds_before", "team2_odds_before", "team1_odds_after", "team2_odds_after"]:
+            frame[column] = frame[column].str.split().str[0]
+        frame["time_before"] = frame["file1"].map(extract_timestamp).map(lambda dt: dt.strftime("%b %d %-I:%M%p") if dt else None)
+        frame["time_after"] = frame["file2"].map(extract_timestamp).map(lambda dt: dt.strftime("%b %d %-I:%M%p") if dt else None)
+    else:
+        for column in ["team_1", "team_2", "team1_odds_before", "team2_odds_before", "team1_odds_after", "team2_odds_after", "time_before", "time_after"]:
+            frame[column] = pd.Series(dtype="object")
+    frame = frame.map(lambda value: value.strip() if isinstance(value, str) else value)
+    frame.to_csv(output_path, index=False)
+    frame.loc[frame["sportsbook"].eq("Circa")].to_csv(output_path.replace(".csv", "_circa.csv"), index=False)
+    frame.loc[frame["sportsbook"].eq("DK")].to_csv(output_path.replace(".csv", "_dk.csv"), index=False)
+    print(f"Parsed {normalized_games} game snapshots and wrote {len(frame)} movement rows to {output_path}")
+    return frame
 
-### Filter dates ###
-import pandas as pd
-from datetime import datetime, timedelta
-import os
-import glob
 
-print("\nExample format: 20241223 (for Dec 23, 2024)")
-starter_date_default = (datetime.now() - timedelta(days=7)).strftime('%Y%m%d')
-current_date = datetime.now().strftime('%Y%m%d')
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--source-dir", default="../Scraping/data")
+    parser.add_argument("--data-dir", default="data")
+    parser.add_argument("--start-date")
+    parser.add_argument("--end-date")
+    parser.add_argument("--cleanup", action="store_true")
+    args = parser.parse_args()
+    os.makedirs(args.data_dir, exist_ok=True)
+    if os.path.isdir(args.source_dir):
+        shutil.copytree(args.source_dir, args.data_dir, dirs_exist_ok=True)
+    odds_dir = os.path.join(args.data_dir, "odds")
+    for path in glob.glob(os.path.join(odds_dir, "*")):
+        if os.path.isfile(path) and os.stat(path).st_size == 0:
+            os.remove(path)
+    output = os.path.join(args.data_dir, "nfl_odds_movements.csv")
+    frame = process_directory(odds_dir, output)
 
-# Get start date with default
-start_date = input(f"Enter start date (YYYYMMDD) [press Enter for {starter_date_default}]: ").strip()
-if not start_date:
-    start_date = starter_date_default
+    default_start = (datetime.now() - timedelta(days=7)).strftime("%Y%m%d")
+    start_date = args.start_date or input(f"Enter start date (YYYYMMDD) [press Enter for {default_start}]: ").strip() or default_start
+    default_end = (datetime.strptime(start_date, "%Y%m%d") + timedelta(days=7)).strftime("%Y%m%d")
+    end_date = args.end_date or input(f"Enter end date (YYYYMMDD) [press Enter for {default_end}]: ").strip() or default_end
+    datetime.strptime(start_date, "%Y%m%d"); datetime.strptime(end_date, "%Y%m%d")
+    for suffix in ["", "_circa", "_dk"]:
+        path = output.replace(".csv", f"{suffix}.csv")
+        subset = pd.read_csv(path)
+        dates = subset["file1"].str.extract(r"(\d{8})", expand=False)
+        subset = subset.loc[dates.between(start_date, end_date)]
+        subset.to_csv(path, index=False)
+        print(f"Filtered {suffix or 'all'} odds data saved to {path} ({len(subset)} rows)")
+    cleanup = args.cleanup or (not args.start_date and input("Remove raw odds files outside the date range? (y/n) [press Enter for n]: ").strip().lower() == "y")
+    if cleanup:
+        for path in glob.glob(os.path.join(odds_dir, "nfl_odds_vsin_*.json")):
+            file_date = os.path.basename(path).split("_")[-2]
+            if not start_date <= file_date <= end_date:
+                os.remove(path)
 
-# Get end date with default (1 week after start date)
-start_dt = datetime.strptime(start_date, '%Y%m%d')
-default_end = (start_dt + timedelta(days=7)).strftime('%Y%m%d')
-end_date = input(f"Enter end date (YYYYMMDD) [press Enter for {default_end}]: ").strip()
-if not end_date:
-    end_date = default_end
 
-# Validate dates
-datetime.strptime(start_date, '%Y%m%d')
-datetime.strptime(end_date, '%Y%m%d')
-
-# Files to process
-input_files = {
-    'all': 'data/nfl_odds_movements.csv',
-    'circa': 'data/nfl_odds_movements_circa.csv',
-    'dk': 'data/nfl_odds_movements_dk.csv'
-}
-
-# Process each file
-for name, file_path in input_files.items():
-    # Read and filter data
-    df = pd.read_csv(file_path)
-    df['date'] = df['file1'].str.extract(r'(\d{8})')
-    df = df[(df['date'] >= start_date) & (df['date'] <= end_date)]
-    df = df.drop('date', axis=1)
-    
-    # Save back to original file
-    df.to_csv(file_path, index=False)
-    print(f"Filtered {name} odds data saved to {file_path} ({len(df)} rows)")
-
-# Ask about cleaning up raw files
-# cleanup = input("\nRemove raw odds files from data/odds/? (y/n): ").lower().strip()
-cleanup = input("\nRemove raw odds files from data/odds/? (y/n) [press Enter for n]: ").lower().strip()
-if cleanup == 'y':
-    # Get all JSON files in the odds directory
-    odds_files = glob.glob('data/odds/nfl_odds_vsin_*.json')
-    removed = 0
-    
-    for file in odds_files:
-        # Extract date from filename
-        file_date = file.split('_')[-2]  # Gets YYYYMMDD from filename
-        
-        # Remove if outside date range
-        if file_date < start_date or file_date > end_date:
-            os.remove(file)
-            removed += 1
-    
-    print(f"\nRemoved {removed} raw odds files outside the date range {start_date} to {end_date}") 
+if __name__ == "__main__":
+    main()
