@@ -52,16 +52,23 @@ try:
         print("ESPN page load timed out; continuing with the loaded document.")
     wait = WebDriverWait(driver, 10)
     wait.until(EC.presence_of_element_located((By.CLASS_NAME, "ResponsiveTable")))
-    tables = driver.find_elements(By.CLASS_NAME, "ResponsiveTable")
-    all_data = []
-    for table in tables:
-        headers = [th.text for th in table.find_elements(By.TAG_NAME, "th")]
-        rows = table.find_elements(By.TAG_NAME, "tr")
-        for row in rows:
-            row_data = [td.text for td in row.find_elements(By.TAG_NAME, "td")]
-            if row_data:
-                all_data.append(row_data)
-    df = pd.DataFrame(all_data, columns=headers)
+    tables_data = driver.execute_script("""
+        return Array.from(document.querySelectorAll('.ResponsiveTable')).map(table => ({
+            headers: Array.from(table.querySelectorAll('th')).map(th => th.textContent.trim()),
+            rows: Array.from(table.querySelectorAll('tr')).map(row =>
+                Array.from(row.querySelectorAll('td')).map(td => td.textContent.trim())
+            ).filter(row => row.length)
+        }));
+    """)
+    frames = []
+    for table_data in tables_data:
+        headers = table_data["headers"]
+        rows = [row for row in table_data["rows"] if len(row) == len(headers)]
+        if headers and rows:
+            frames.append(pd.DataFrame(rows, columns=headers))
+    if not frames:
+        raise RuntimeError("ESPN injury table contained no data")
+    df = pd.concat(frames, ignore_index=True)
     script_dir = os.path.dirname(os.path.abspath(__file__))
     output_dir = os.path.join(script_dir, "data/injury-reports")
     os.makedirs(output_dir, exist_ok=True)
