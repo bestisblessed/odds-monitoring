@@ -22,6 +22,11 @@ Crontab line:
 */4 * * * * /bin/bash /home/durrrrr/odds-monitoring/UFC/run_scraper_and_monitor.sh >> /home/durrrrr/odds-monitoring/UFC/cron_v1.log 2>&1
 ```
 
+The v1 runner publishes compact line-history to Supabase after each
+moneylines scrape (`supabase_odds_publisher.py --line-history --live`). That
+command also prunes `ufc_odds_line_history` rows whose `last_seen_at` is older
+than 14 days, so no extra cron job is required.
+
 ## v2: n8n Version
 
 This is the n8n runtime path:

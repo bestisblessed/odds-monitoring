@@ -1,10 +1,25 @@
+"""Publish FightOdds UFC snapshots to Supabase.
+
+Live compact line-history (`--line-history --live`) upserts `ufc_odds_line_history`
+then deletes rows whose `last_seen_at` is older than 14 days. Override with
+`--retain-days` or `UFC_LINE_HISTORY_RETAIN_DAYS`. Active open-board segments are
+kept because each scrape refreshes their `last_seen_at`.
+
+Closed segments older than the retention window are removed permanently.
+Consumers that need a longer lookback must export beforehand.
+
+This publisher never deletes `ufc_fighters`, `ufc_fighter_source_map`,
+`ufc_source_fights`, or `ufc_latest_odds`. Optional ingest-run cleanup is off by
+default (`--ingest-retain-days` / `UFC_INGEST_RUNS_RETAIN_DAYS`).
+"""
+
 import argparse
 import csv
 import json
 import math
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -24,6 +39,12 @@ LATEST_ON_CONFLICT = "source,market,event_name,fight_id,fighter,sportsbook"
 HISTORY_ON_CONFLICT = "source,market,source_file,event_name,fight_id,fighter,sportsbook"
 LINE_ON_CONFLICT = "source,market,event_name,fight_id,fighter,sportsbook,valid_from"
 LINE_KEY_COLUMNS = ("source", "market", "event_name", "fight_id", "sportsbook")
+DEFAULT_LINE_HISTORY_RETAIN_DAYS = 14
+DEFAULT_INGEST_RUNS_RETAIN_DAYS = 0
+LINE_HISTORY_RETAIN_DAYS_ENV = "UFC_LINE_HISTORY_RETAIN_DAYS"
+INGEST_RUNS_RETAIN_DAYS_ENV = "UFC_INGEST_RUNS_RETAIN_DAYS"
+LINE_HISTORY_PRUNE_COLUMN = "last_seen_at"
+INGEST_RUNS_PRUNE_COLUMN = "created_at"
 BASE_COLUMNS = {
     "Event",
     "Event_URL",
@@ -492,6 +513,14 @@ def post_rest(session, config, table_name, payload, params=None, prefer="return=
     return response
 
 
+def rest_failure(response, action, table_name):
+    detail = getattr(response, "text", "")
+    status_code = getattr(response, "status_code", "unknown")
+    return RuntimeError(
+        f"Supabase REST {action} failed for {table_name}: HTTP {status_code} {detail}"
+    )
+
+
 def get_rest(session, config, table_name, params=None):
     response = session.get(
         f"{config.url}/rest/v1/{table_name}",
@@ -505,12 +534,136 @@ def get_rest(session, config, table_name, params=None):
     try:
         response.raise_for_status()
     except Exception as exc:
-        detail = getattr(response, "text", "")
-        status_code = getattr(response, "status_code", "unknown")
-        raise RuntimeError(
-            f"Supabase REST read failed for {table_name}: HTTP {status_code} {detail}"
-        ) from exc
+        raise rest_failure(response, "read", table_name) from exc
     return response.json()
+
+
+def delete_rest(session, config, table_name, params, prefer="return=minimal,count=exact"):
+    response = session.delete(
+        f"{config.url}/rest/v1/{table_name}",
+        params=params,
+        headers=supabase_headers(config, prefer),
+        timeout=config.timeout,
+    )
+    try:
+        response.raise_for_status()
+    except Exception as exc:
+        raise rest_failure(response, "delete", table_name) from exc
+    return response
+
+
+def parse_content_range_total(response):
+    headers = getattr(response, "headers", None) or {}
+    content_range = headers.get("Content-Range") or headers.get("content-range") or ""
+    if "/" not in content_range:
+        return None
+    total = content_range.rsplit("/", 1)[-1].strip()
+    return int(total) if total.isdigit() else None
+
+
+def env_int(name, default):
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        return int(str(raw).strip())
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer, got {raw!r}.") from exc
+
+
+def resolve_retain_days(cli_value, env_name, default):
+    value = env_int(env_name, default) if cli_value is None else cli_value
+    if value < 0:
+        raise RuntimeError(f"{env_name} must be >= 0, got {value}.")
+    return value
+
+
+def retention_cutoff_iso(retain_days, now=None):
+    if not retain_days:
+        return None
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    cutoff = now.astimezone(timezone.utc) - timedelta(days=retain_days)
+    return cutoff.replace(microsecond=0).isoformat()
+
+
+def prune_filter(timestamp_column, cutoff):
+    return {timestamp_column: f"lt.{cutoff}"}
+
+
+def assert_prune_allowed(config, table_name, timestamp_column):
+    allowed = {
+        (config.line_history_table, LINE_HISTORY_PRUNE_COLUMN),
+        (config.ingest_table, INGEST_RUNS_PRUNE_COLUMN),
+    }
+    if (table_name, timestamp_column) not in allowed:
+        raise ValueError(
+            f"Refusing to prune {table_name} by {timestamp_column}; "
+            "only line-history last_seen_at and ingest created_at are allowed."
+        )
+
+
+def prune_stale_table_rows(
+    session,
+    config,
+    table_name,
+    timestamp_column,
+    retain_days,
+    dry_run=True,
+    now=None,
+):
+    assert_prune_allowed(config, table_name, timestamp_column)
+    cutoff = retention_cutoff_iso(retain_days, now=now)
+    result = {
+        "table": table_name,
+        "timestamp_column": timestamp_column,
+        "retain_days": retain_days,
+        "cutoff": cutoff,
+        "deleted_count": 0,
+        "skipped": cutoff is None,
+        "dry_run": dry_run,
+        "filter": None if cutoff is None else prune_filter(timestamp_column, cutoff),
+    }
+    if cutoff is None or dry_run:
+        return result
+
+    if not config.url or not config.service_role_key:
+        raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for live prune.")
+
+    session = session or requests.Session()
+    response = delete_rest(
+        session,
+        config,
+        table_name,
+        params=result["filter"],
+    )
+    result["deleted_count"] = parse_content_range_total(response) or 0
+    return result
+
+
+def prune_stale_line_history(session, config, retain_days=DEFAULT_LINE_HISTORY_RETAIN_DAYS, dry_run=True, now=None):
+    return prune_stale_table_rows(
+        session,
+        config,
+        config.line_history_table,
+        LINE_HISTORY_PRUNE_COLUMN,
+        retain_days,
+        dry_run=dry_run,
+        now=now,
+    )
+
+
+def prune_stale_ingest_runs(session, config, retain_days=DEFAULT_INGEST_RUNS_RETAIN_DAYS, dry_run=True, now=None):
+    return prune_stale_table_rows(
+        session,
+        config,
+        config.ingest_table,
+        INGEST_RUNS_PRUNE_COLUMN,
+        retain_days,
+        dry_run=dry_run,
+        now=now,
+    )
 
 
 def ingest_payload_from_rows(rows):
@@ -926,6 +1079,9 @@ def publish_line_rows(
     chunk_size=500,
     csv_paths=None,
     skipped_files=None,
+    retain_days=DEFAULT_LINE_HISTORY_RETAIN_DAYS,
+    ingest_retain_days=DEFAULT_INGEST_RUNS_RETAIN_DAYS,
+    now=None,
 ):
     rows = list(rows)
     csv_paths = list(csv_paths or [])
@@ -955,6 +1111,21 @@ def publish_line_rows(
     result["line_segment_count"] = len(line_build["segments"])
     result["extended_segment_count"] = line_build["extended_segment_count"]
     result["inserted_segment_count"] = line_build["inserted_segment_count"]
+    result["line_history_prune"] = prune_stale_line_history(
+        session,
+        config,
+        retain_days=retain_days,
+        dry_run=True,
+        now=now,
+    )
+    if ingest_retain_days:
+        result["ingest_runs_prune"] = prune_stale_ingest_runs(
+            session,
+            config,
+            retain_days=ingest_retain_days,
+            dry_run=True,
+            now=now,
+        )
 
     if dry_run:
         return result
@@ -972,6 +1143,22 @@ def publish_line_rows(
     ingest_payload = ingest_payload_from_rows(rows)
     if ingest_payload:
         post_rest(session, config, config.ingest_table, ingest_payload, prefer="return=minimal")
+
+    result["line_history_prune"] = prune_stale_line_history(
+        session,
+        config,
+        retain_days=retain_days,
+        dry_run=False,
+        now=now,
+    )
+    if ingest_retain_days:
+        result["ingest_runs_prune"] = prune_stale_ingest_runs(
+            session,
+            config,
+            retain_days=ingest_retain_days,
+            dry_run=False,
+            now=now,
+        )
 
     return result
 
@@ -1022,8 +1209,52 @@ def load_rows_from_csvs(csv_paths, skip_invalid=False):
     return rows, skipped_files
 
 
+def config_from_args(args, live):
+    if live:
+        return build_config_from_env(
+            args.history_table,
+            args.line_history_table,
+            args.latest_table,
+            args.ingest_table,
+        )
+    return SupabaseConfig(
+        "",
+        "",
+        history_table=args.history_table,
+        line_history_table=args.line_history_table,
+        latest_table=args.latest_table,
+        ingest_table=args.ingest_table,
+    )
+
+
+def run_requested_prunes(session, config, retain_days, ingest_retain_days, dry_run, now=None, prune_line_history=True, prune_ingest_runs=False):
+    result = {"dry_run": dry_run}
+    if prune_line_history:
+        result["line_history_prune"] = prune_stale_line_history(
+            session,
+            config,
+            retain_days=retain_days,
+            dry_run=dry_run,
+            now=now,
+        )
+    if prune_ingest_runs or ingest_retain_days:
+        result["ingest_runs_prune"] = prune_stale_ingest_runs(
+            session,
+            config,
+            retain_days=ingest_retain_days,
+            dry_run=dry_run,
+            now=now,
+        )
+    return result
+
+
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Dry-run or publish FightOdds CSV odds to Supabase.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Dry-run or publish FightOdds CSV odds to Supabase. "
+            "Live --line-history also prunes ufc_odds_line_history rows with last_seen_at older than 14 days."
+        )
+    )
     parser.add_argument("--csv-path", type=Path)
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     parser.add_argument("--all", "--backfill", dest="backfill_all", action="store_true")
@@ -1034,6 +1265,34 @@ def main(argv=None):
     parser.add_argument("--chunk-size", type=int, default=500)
     parser.add_argument("--line-history", action="store_true", help="Publish compact odds line-history segments.")
     parser.add_argument("--live", action="store_true", help="Actually upsert rows into Supabase.")
+    parser.add_argument(
+        "--prune-line-history",
+        action="store_true",
+        help="Delete ufc_odds_line_history rows older than --retain-days without publishing a snapshot.",
+    )
+    parser.add_argument(
+        "--retain-days",
+        type=int,
+        default=None,
+        help=(
+            f"Keep line-history rows with last_seen_at within this many days "
+            f"(default {DEFAULT_LINE_HISTORY_RETAIN_DAYS}; env {LINE_HISTORY_RETAIN_DAYS_ENV}; 0 disables prune)."
+        ),
+    )
+    parser.add_argument(
+        "--prune-ingest-runs",
+        action="store_true",
+        help="Also delete old ufc_odds_ingest_runs rows (default 30 days when this flag is set).",
+    )
+    parser.add_argument(
+        "--ingest-retain-days",
+        type=int,
+        default=None,
+        help=(
+            f"Keep ingest-run rows with created_at within this many days "
+            f"(default {DEFAULT_INGEST_RUNS_RETAIN_DAYS}/off; env {INGEST_RUNS_RETAIN_DAYS_ENV})."
+        ),
+    )
     parser.add_argument("--print-schema", action="store_true", help="Print the expected table SQL.")
     args = parser.parse_args(argv)
 
@@ -1041,8 +1300,40 @@ def main(argv=None):
         print(SCHEMA_SQL.strip())
         return 0
 
+    try:
+        retain_days = resolve_retain_days(
+            args.retain_days,
+            LINE_HISTORY_RETAIN_DAYS_ENV,
+            DEFAULT_LINE_HISTORY_RETAIN_DAYS,
+        )
+        ingest_default = 30 if args.prune_ingest_runs else DEFAULT_INGEST_RUNS_RETAIN_DAYS
+        ingest_retain_days = resolve_retain_days(
+            args.ingest_retain_days,
+            INGEST_RUNS_RETAIN_DAYS_ENV,
+            ingest_default,
+        )
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from None
+
     if args.csv_path and args.backfill_all:
         raise SystemExit("Use either --csv-path or --all, not both.")
+
+    prune_only = (args.prune_line_history or args.prune_ingest_runs) and not args.line_history
+    if prune_only:
+        if args.csv_path or args.backfill_all:
+            raise SystemExit("Prune-only mode does not take --csv-path or --all.")
+        config = config_from_args(args, args.live)
+        result = run_requested_prunes(
+            session=None,
+            config=config,
+            retain_days=retain_days,
+            ingest_retain_days=ingest_retain_days,
+            dry_run=not args.live,
+            prune_line_history=args.prune_line_history or not args.prune_ingest_runs,
+            prune_ingest_runs=args.prune_ingest_runs or bool(ingest_retain_days),
+        )
+        print(json.dumps(result, indent=2))
+        return 0
 
     if args.backfill_all:
         csv_paths = find_all_csvs(args.data_dir)
@@ -1057,32 +1348,23 @@ def main(argv=None):
         rows, skipped_files = load_rows_from_csvs(csv_paths, skip_invalid=args.backfill_all)
     except RuntimeError as exc:
         raise SystemExit(str(exc)) from None
-    config = (
-        build_config_from_env(
-            args.history_table,
-            args.line_history_table,
-            args.latest_table,
-            args.ingest_table,
+    config = config_from_args(args, args.live)
+    publish_kwargs = {
+        "dry_run": not args.live,
+        "chunk_size": args.chunk_size,
+        "csv_paths": csv_paths,
+        "skipped_files": skipped_files,
+    }
+    if args.line_history:
+        result = publish_line_rows(
+            config,
+            rows,
+            retain_days=retain_days,
+            ingest_retain_days=ingest_retain_days,
+            **publish_kwargs,
         )
-        if args.live
-        else SupabaseConfig(
-            "",
-            "",
-            history_table=args.history_table,
-            line_history_table=args.line_history_table,
-            latest_table=args.latest_table,
-            ingest_table=args.ingest_table,
-        )
-    )
-    publish_func = publish_line_rows if args.line_history else publish_rows
-    result = publish_func(
-        config,
-        rows,
-        dry_run=not args.live,
-        chunk_size=args.chunk_size,
-        csv_paths=csv_paths,
-        skipped_files=skipped_files,
-    )
+    else:
+        result = publish_rows(config, rows, **publish_kwargs)
     print(json.dumps(result, indent=2))
     return 0
 
