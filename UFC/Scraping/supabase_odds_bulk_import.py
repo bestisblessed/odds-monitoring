@@ -9,18 +9,13 @@ import pandas as pd
 
 from supabase_odds_publisher import (
     DEFAULT_DATA_DIR,
-    DEFAULT_HISTORY_TABLE,
-    DEFAULT_INGEST_TABLE,
     DEFAULT_LINE_HISTORY_TABLE,
-    HISTORY_ON_CONFLICT,
     LINE_ON_CONFLICT,
-    clean_text,
     find_all_csvs,
     history_key,
     iter_rows_from_csv,
     line_key,
     line_segment_from_row,
-    parse_scraped_at,
 )
 
 
@@ -34,23 +29,10 @@ LINE_MANIFEST_NAME = "ufc_odds_line_history_manifest.json"
 LINE_LOAD_SQL_NAME = "load_ufc_odds_line_history.sql"
 LINE_VERIFY_SQL_NAME = "verify_ufc_odds_line_history.sql"
 LINE_PART_PREFIX = "ufc_odds_line_history_part_"
-HISTORY_COLUMNS = [
-    "source",
-    "market",
-    "source_file",
-    "event_name",
-    "fight_id",
-    "source_event_id",
-    "event_raw",
-    "event_url",
-    "fighter",
-    "source_fighter_id",
-    "sherdog_fighter_id",
-    "fighter_identity_key",
-    "sportsbook",
-    "odds_american",
-    "scraped_at",
-]
+SNAPSHOT_BULK_IMPORT_RETIRED = (
+    "Snapshot bulk import to ufc_odds_history is retired. "
+    "Use --mode compact to compile ufc_odds_line_history."
+)
 LINE_HISTORY_COLUMNS = [
     "source",
     "market",
@@ -73,12 +55,12 @@ LINE_HISTORY_COLUMNS = [
 
 
 class ChunkedCsvWriter:
-    def __init__(self, output_dir, rows_per_file, columns=None, part_prefix=PART_PREFIX):
+    def __init__(self, output_dir, rows_per_file, columns=None, part_prefix=LINE_PART_PREFIX):
         if rows_per_file < 1:
             raise ValueError("--rows-per-file must be at least 1")
         self.output_dir = Path(output_dir)
         self.rows_per_file = rows_per_file
-        self.columns = columns or HISTORY_COLUMNS
+        self.columns = columns or LINE_HISTORY_COLUMNS
         self.part_prefix = part_prefix
         self.part_paths = []
         self.current_rows = 0
@@ -141,330 +123,6 @@ def ensure_output_dir(output_dir, overwrite=False):
         for path in generated_files:
             if path.is_file():
                 path.unlink()
-
-
-def update_matchup_stats(matchup_stats, matchup_index, event_name, fight_id, fighters, source_file, scraped_at):
-    fighters = tuple(sorted(clean_text(fighter) for fighter in fighters if clean_text(fighter)))
-    if len(fighters) != 2 or not event_name:
-        return
-
-    key = (event_name, fight_id or "", fighters)
-    stats = matchup_stats.setdefault(
-        key,
-        {
-            "event_name": event_name,
-            "fight_id": fight_id or "",
-            "fighters": fighters,
-            "source_files": set(),
-            "scraped_at": set(),
-            "compiled_row_count": 0,
-        },
-    )
-    stats["source_files"].add(source_file)
-    stats["scraped_at"].add(scraped_at)
-    for fighter in fighters:
-        matchup_index[(event_name, fight_id or "", fighter)] = stats
-
-
-def update_matchup_row_count(matchup_index, row):
-    key = (row.get("event_name") or "", row.get("fight_id") or "", row.get("fighter") or "")
-    stats = matchup_index.get(key)
-    if stats is not None:
-        stats["compiled_row_count"] += 1
-
-
-def update_matchup_stats_from_csv(matchup_stats, matchup_index, csv_path):
-    csv_path = Path(csv_path)
-    scraped_at = parse_scraped_at(csv_path)
-    by_fight_id = {}
-    fallback_rows = []
-
-    with csv_path.open(newline="", encoding="utf-8-sig") as handle:
-        reader = csv.DictReader(handle)
-        if not reader.fieldnames:
-            raise pd.errors.EmptyDataError("No columns to parse from file")
-
-        for raw_row in reader:
-            event_raw = clean_text(raw_row.get("Event"))
-            fighter = clean_text(raw_row.get("Fighters"))
-            if not event_raw or not fighter:
-                continue
-
-            event_name = event_raw.splitlines()[0].strip()
-            fight_id = clean_text(raw_row.get("FightOdds_Fight_ID"))
-            if fight_id:
-                by_fight_id.setdefault((event_name, fight_id), set()).add(fighter)
-            else:
-                fallback_rows.append((event_name, fighter))
-
-    for (event_name, fight_id), fighters in by_fight_id.items():
-        if len(fighters) == 2:
-            update_matchup_stats(
-                matchup_stats,
-                matchup_index,
-                event_name,
-                fight_id,
-                fighters,
-                csv_path.name,
-                scraped_at,
-            )
-
-    pending_by_event = {}
-    for event_name, fighter in fallback_rows:
-        pending = pending_by_event.setdefault(event_name, [])
-        pending.append(fighter)
-        if len(pending) == 2:
-            update_matchup_stats(
-                matchup_stats,
-                matchup_index,
-                event_name,
-                "",
-                pending,
-                csv_path.name,
-                scraped_at,
-            )
-            pending_by_event[event_name] = []
-
-
-def summarize_matchup_samples(matchup_stats, sample_count):
-    summaries = []
-    for stats in matchup_stats.values():
-        if len(stats["scraped_at"]) < 2:
-            continue
-        scraped_values = sorted(value for value in stats["scraped_at"] if value)
-        summaries.append(
-            {
-                "event_name": stats["event_name"],
-                "fight_id": stats["fight_id"],
-                "fighters": list(stats["fighters"]),
-                "source_file_count": len([value for value in stats["source_files"] if value]),
-                "scraped_at_count": len(scraped_values),
-                "compiled_row_count": stats["compiled_row_count"],
-                "min_scraped_at": scraped_values[0] if scraped_values else None,
-                "max_scraped_at": scraped_values[-1] if scraped_values else None,
-            }
-        )
-
-    summaries.sort(
-        key=lambda item: (
-            item["scraped_at_count"],
-            item["source_file_count"],
-            item["compiled_row_count"],
-        ),
-        reverse=True,
-    )
-    return summaries[:sample_count]
-
-
-def stage_table_sql():
-    return """
-create temp table ufc_odds_history_stage (
-    source text not null,
-    market text not null,
-    source_file text not null,
-    event_name text not null,
-    fight_id text not null default '',
-    source_event_id text,
-    event_raw text,
-    event_url text,
-    fighter text not null,
-    source_fighter_id text,
-    sherdog_fighter_id bigint,
-    fighter_identity_key text,
-    sportsbook text not null,
-    odds_american integer not null,
-    scraped_at timestamptz not null
-) on commit drop;
-""".strip()
-
-
-def deduped_cte_sql():
-    conflict_columns = ", ".join(HISTORY_ON_CONFLICT.split(","))
-    return f"""
-deduped as (
-    select distinct on ({conflict_columns})
-        source,
-        market,
-        source_file,
-        event_name,
-        fight_id,
-        source_event_id,
-        event_raw,
-        event_url,
-        fighter,
-        source_fighter_id,
-        sherdog_fighter_id,
-        fighter_identity_key,
-        sportsbook,
-        odds_american,
-        scraped_at
-    from ufc_odds_history_stage
-    order by {conflict_columns}, scraped_at desc
-)
-""".strip()
-
-
-def upsert_history_sql(history_table=DEFAULT_HISTORY_TABLE):
-    columns = ", ".join(HISTORY_COLUMNS)
-    update_assignments = """
-    event_raw = excluded.event_raw,
-    event_url = excluded.event_url,
-    source_event_id = excluded.source_event_id,
-    source_fighter_id = excluded.source_fighter_id,
-    sherdog_fighter_id = excluded.sherdog_fighter_id,
-    fighter_identity_key = excluded.fighter_identity_key,
-    odds_american = excluded.odds_american,
-    scraped_at = excluded.scraped_at,
-    updated_at = now()
-""".strip()
-    return f"""
-with {deduped_cte_sql()}
-insert into public.{history_table} ({columns})
-select {columns}
-from deduped
-on conflict ({HISTORY_ON_CONFLICT}) do update set
-{update_assignments};
-""".strip()
-
-
-def insert_ingest_sql(ingest_table=DEFAULT_INGEST_TABLE):
-    return f"""
-with {deduped_cte_sql()},
-per_file as (
-    select
-        source,
-        market,
-        source_file,
-        count(*)::integer as row_count,
-        min(scraped_at) as scraped_at
-    from deduped
-    group by source, market, source_file
-)
-insert into public.{ingest_table} (source, market, source_file, row_count, scraped_at)
-select source, market, source_file, row_count, scraped_at
-from per_file
-where not exists (
-    select 1
-    from public.{ingest_table} existing
-    where existing.source = per_file.source
-      and existing.market = per_file.market
-      and existing.source_file = per_file.source_file
-);
-""".strip()
-
-
-def render_load_sql(part_paths, history_table=DEFAULT_HISTORY_TABLE, ingest_table=DEFAULT_INGEST_TABLE):
-    lines = [
-        "\\set ON_ERROR_STOP on",
-        "\\timing on",
-        "set statement_timeout = '0';",
-        "",
-    ]
-    columns = ", ".join(HISTORY_COLUMNS)
-    for index, part_path in enumerate(part_paths, start=1):
-        path = Path(part_path).resolve()
-        lines.extend(
-            [
-                f"\\echo Loading odds history part {index}/{len(part_paths)}: {path.name}",
-                "begin;",
-                stage_table_sql(),
-                f"\\copy ufc_odds_history_stage ({columns}) from {sql_literal(path)} with (format csv, header true)",
-                upsert_history_sql(history_table),
-                insert_ingest_sql(ingest_table),
-                "commit;",
-                "",
-            ]
-        )
-    lines.extend(
-        [
-            f"analyze public.{history_table};",
-            f"analyze public.{ingest_table};",
-            "",
-        ]
-    )
-    return "\n".join(lines)
-
-
-def render_verify_sql(manifest, history_table=DEFAULT_HISTORY_TABLE):
-    samples = manifest.get("matchup_samples") or manifest.get("fight_samples") or []
-    lines = [
-        "\\set ON_ERROR_STOP on",
-        "\\timing on",
-        "",
-        f"select count(*)::bigint as total_rows, count(distinct source_file)::bigint as source_files, min(scraped_at) as min_scraped_at, max(scraped_at) as max_scraped_at from public.{history_table};",
-        "",
-    ]
-    if not samples:
-        lines.append(
-            "select 'No compiled fights had at least two fighters and two timestamps.' as verification_note;"
-        )
-        return "\n".join(lines)
-
-    values = []
-    for sample in samples:
-        fighters = sample.get("fighters") or ["", ""]
-        values.append(
-            "("
-            f"{sql_literal(sample['event_name'])}, "
-            f"{sql_literal(sample['fight_id'])}, "
-            f"{sql_literal(fighters[0])}, "
-            f"{sql_literal(fighters[1])}, "
-            f"{int(sample.get('compiled_row_count', sample.get('row_count', 0)))}, "
-            f"{int(sample['scraped_at_count'])}, "
-            f"{int(sample['source_file_count'])}"
-            ")"
-        )
-
-    values_sql = ",\n        ".join(values)
-
-    lines.append(
-        f"""
-with expected(event_name, fight_id, fighter_one, fighter_two, expected_rows, expected_timestamps, expected_source_files) as (
-    values
-        {values_sql}
-),
-actual as (
-    select
-        expected.event_name,
-        expected.fight_id,
-        expected.fighter_one,
-        expected.fighter_two,
-        count(history.*)::integer as actual_rows,
-        count(distinct history.scraped_at)::integer as actual_timestamps,
-        count(distinct history.source_file)::integer as actual_source_files,
-        min(history.scraped_at) as min_scraped_at,
-        max(history.scraped_at) as max_scraped_at,
-        array_agg(distinct history.fighter order by history.fighter) filter (where history.fighter is not null) as fighters
-    from expected
-    left join public.{history_table} history
-      on history.event_name = expected.event_name
-     and history.fighter in (expected.fighter_one, expected.fighter_two)
-     and (expected.fight_id = '' or history.fight_id = expected.fight_id)
-    group by expected.event_name, expected.fight_id, expected.fighter_one, expected.fighter_two
-)
-select
-    expected.event_name,
-    expected.fight_id,
-    array[expected.fighter_one, expected.fighter_two] as expected_fighters,
-    actual.fighters,
-    expected.expected_rows,
-    actual.actual_rows,
-    expected.expected_timestamps,
-    actual.actual_timestamps,
-    expected.expected_source_files,
-    actual.actual_source_files,
-    actual.min_scraped_at,
-    actual.max_scraped_at,
-    actual.actual_rows >= expected.expected_rows
-      and actual.actual_timestamps >= expected.expected_timestamps
-      and actual.actual_source_files >= expected.expected_source_files
-      as loaded_all_compiled_history
-from expected
-left join actual using (event_name, fight_id, fighter_one, fighter_two)
-order by expected.expected_timestamps desc, expected.expected_rows desc;
-""".strip()
-    )
-    return "\n".join(lines) + "\n"
 
 
 def line_stage_table_sql():
@@ -724,156 +382,31 @@ def compile_compact_bulk_import(
     return manifest
 
 
-def compile_bulk_import(
-    data_dir=DEFAULT_DATA_DIR,
-    output_dir=DEFAULT_OUTPUT_DIR,
-    rows_per_file=1_000_000,
-    limit_files=None,
-    sample_fight_count=5,
-    progress_every=250,
-    overwrite=False,
-):
-    data_dir = Path(data_dir)
-    output_dir = Path(output_dir)
-    ensure_output_dir(output_dir, overwrite=overwrite)
-    csv_paths = find_all_csvs(data_dir)
-    if limit_files is not None:
-        csv_paths = csv_paths[:limit_files]
-    if not csv_paths:
-        raise RuntimeError(f"No ufc_odds_fightoddsio_*.csv files found in {data_dir}")
-
-    writer = ChunkedCsvWriter(output_dir, rows_per_file)
-    skipped_files = []
-    matchup_stats = {}
-    matchup_index = {}
-    total_rows = 0
-    duplicate_key_count = 0
-    processed_file_count = 0
-    min_scraped_at = None
-    max_scraped_at = None
-
-    try:
-        for index, csv_path in enumerate(csv_paths, start=1):
-            file_keys = set()
-            file_rows = 0
-            try:
-                update_matchup_stats_from_csv(matchup_stats, matchup_index, csv_path)
-                for row in iter_rows_from_csv(csv_path):
-                    key = history_key(row)
-                    if key in file_keys:
-                        duplicate_key_count += 1
-                        continue
-                    file_keys.add(key)
-                    writer.write_row(row)
-                    update_matchup_row_count(matchup_index, row)
-                    total_rows += 1
-                    file_rows += 1
-                    scraped_at = row.get("scraped_at")
-                    if scraped_at:
-                        min_scraped_at = (
-                            scraped_at if min_scraped_at is None else min(min_scraped_at, scraped_at)
-                        )
-                        max_scraped_at = (
-                            scraped_at if max_scraped_at is None else max(max_scraped_at, scraped_at)
-                        )
-                processed_file_count += 1
-                if progress_every and (index == 1 or index % progress_every == 0 or index == len(csv_paths)):
-                    print(
-                        json.dumps(
-                            {
-                                "status": "compiled_file",
-                                "index": index,
-                                "total_files": len(csv_paths),
-                                "source_file": csv_path.name,
-                                "file_rows": file_rows,
-                                "compiled_rows": total_rows,
-                                "parts": len(writer.part_paths),
-                            }
-                        ),
-                        flush=True,
-                    )
-            except pd.errors.EmptyDataError:
-                skipped_files.append({"csv_path": str(csv_path), "reason": "empty_csv"})
-            except pd.errors.ParserError as exc:
-                skipped_files.append({"csv_path": str(csv_path), "reason": f"parser_error: {exc}"})
-    finally:
-        writer.close()
-
-    manifest = {
-        "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-        "data_dir": str(data_dir.resolve()),
-        "output_dir": str(output_dir.resolve()),
-        "source_file_count": len(csv_paths),
-        "processed_file_count": processed_file_count,
-        "skipped_file_count": len(skipped_files),
-        "skipped_files": skipped_files,
-        "compiled_row_count": total_rows,
-        "duplicate_key_count": duplicate_key_count,
-        "rows_per_file": rows_per_file,
-        "part_count": len(writer.part_paths),
-        "part_files": [str(path.resolve()) for path in writer.part_paths],
-        "min_scraped_at": min_scraped_at,
-        "max_scraped_at": max_scraped_at,
-        "history_table": DEFAULT_HISTORY_TABLE,
-        "ingest_table": DEFAULT_INGEST_TABLE,
-        "matchup_samples": summarize_matchup_samples(matchup_stats, sample_fight_count),
-    }
-
-    manifest_path = output_dir / MANIFEST_NAME
-    load_sql_path = output_dir / LOAD_SQL_NAME
-    verify_sql_path = output_dir / VERIFY_SQL_NAME
-    load_sql_path.write_text(render_load_sql(writer.part_paths), encoding="utf-8")
-    verify_sql_path.write_text(render_verify_sql(manifest), encoding="utf-8")
-
-    manifest["manifest_path"] = str(manifest_path.resolve())
-    manifest["load_sql_path"] = str(load_sql_path.resolve())
-    manifest["verify_sql_path"] = str(verify_sql_path.resolve())
-    manifest["load_command"] = (
-        f"psql \"$SUPABASE_DB_URL\" -v ON_ERROR_STOP=1 -f "
-        f"{shlex.quote(str(load_sql_path.resolve()))}"
-    )
-    manifest["verify_command"] = (
-        f"psql \"$SUPABASE_DB_URL\" -v ON_ERROR_STOP=1 -f "
-        f"{shlex.quote(str(verify_sql_path.resolve()))}"
-    )
-    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    return manifest
-
-
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Compile FightOdds CSV history into psql COPY files and verification SQL."
+        description="Compile FightOdds CSV snapshots into compact line-history psql COPY files."
     )
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--rows-per-file", type=int, default=1_000_000)
     parser.add_argument("--limit-files", type=int)
-    parser.add_argument("--sample-fights", type=int, default=5)
     parser.add_argument("--progress-every", type=int, default=250)
     parser.add_argument("--mode", choices=["compact", "snapshot"], default="compact")
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args(argv)
 
+    if args.mode == "snapshot":
+        raise SystemExit(SNAPSHOT_BULK_IMPORT_RETIRED)
+
     try:
-        if args.mode == "compact":
-            manifest = compile_compact_bulk_import(
-                data_dir=args.data_dir,
-                output_dir=args.output_dir,
-                rows_per_file=args.rows_per_file,
-                limit_files=args.limit_files,
-                progress_every=args.progress_every,
-                overwrite=args.overwrite,
-            )
-        else:
-            manifest = compile_bulk_import(
-                data_dir=args.data_dir,
-                output_dir=args.output_dir,
-                rows_per_file=args.rows_per_file,
-                limit_files=args.limit_files,
-                sample_fight_count=args.sample_fights,
-                progress_every=args.progress_every,
-                overwrite=args.overwrite,
-            )
+        manifest = compile_compact_bulk_import(
+            data_dir=args.data_dir,
+            output_dir=args.output_dir,
+            rows_per_file=args.rows_per_file,
+            limit_files=args.limit_files,
+            progress_every=args.progress_every,
+            overwrite=args.overwrite,
+        )
     except RuntimeError as exc:
         raise SystemExit(str(exc)) from None
 
