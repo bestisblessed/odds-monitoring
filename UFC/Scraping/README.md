@@ -36,7 +36,11 @@ Optional ingest-run cleanup is off by default (`--prune-ingest-runs`, default
 30 days, or `UFC_INGEST_RUNS_RETAIN_DAYS`).
 
 Never deleted by this publisher: `ufc_fighters`, `ufc_fighter_source_map`,
-`ufc_source_fights`, `ufc_latest_odds`.
+`ufc_source_fights`.
+
+`--print-schema` creates/maintains `ufc_odds_line_history` and
+`ufc_odds_ingest_runs` only. `ufc_latest_odds` and `ufc_odds_history` are
+retired and must not be recreated.
 
 ## Movement CSV (unchanged)
 

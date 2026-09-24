@@ -8,9 +8,12 @@ kept because each scrape refreshes their `last_seen_at`.
 Closed segments older than the retention window are removed permanently.
 Consumers that need a longer lookback must export beforehand.
 
-This publisher never deletes `ufc_fighters`, `ufc_fighter_source_map`,
-`ufc_source_fights`, or `ufc_latest_odds`. Optional ingest-run cleanup is off by
-default (`--ingest-retain-days` / `UFC_INGEST_RUNS_RETAIN_DAYS`).
+This publisher never deletes `ufc_fighters`, `ufc_fighter_source_map`, or
+`ufc_source_fights`. Optional ingest-run cleanup is off by default
+(`--ingest-retain-days` / `UFC_INGEST_RUNS_RETAIN_DAYS`).
+
+`ufc_latest_odds` and `ufc_odds_history` are retired: they are not created or
+written. Use `--line-history` to publish `ufc_odds_line_history`.
 """
 
 import argparse
@@ -28,14 +31,15 @@ import requests
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_DATA_DIR = SCRIPT_DIR / "data"
-DEFAULT_LATEST_TABLE = "ufc_latest_odds"
-DEFAULT_HISTORY_TABLE = "ufc_odds_history"
 DEFAULT_LINE_HISTORY_TABLE = "ufc_odds_line_history"
 DEFAULT_INGEST_TABLE = "ufc_odds_ingest_runs"
 DEFAULT_FIGHTERS_TABLE = "ufc_fighters"
 DEFAULT_FIGHTER_SOURCE_MAP_TABLE = "ufc_fighter_source_map"
 DEFAULT_SOURCE_FIGHTS_TABLE = "ufc_source_fights"
-LATEST_ON_CONFLICT = "source,market,event_name,fight_id,fighter,sportsbook"
+SNAPSHOT_PUBLISH_RETIRED = (
+    "Snapshot publish to ufc_odds_history / ufc_latest_odds is retired. "
+    "Use --line-history to publish ufc_odds_line_history."
+)
 HISTORY_ON_CONFLICT = "source,market,source_file,event_name,fight_id,fighter,sportsbook"
 LINE_ON_CONFLICT = "source,market,event_name,fight_id,fighter,sportsbook,valid_from"
 LINE_KEY_COLUMNS = ("source", "market", "event_name", "fight_id", "sportsbook")
@@ -64,47 +68,6 @@ BASE_COLUMNS = {
 }
 
 SCHEMA_SQL = """
-create table if not exists public.ufc_odds_history (
-    source text not null,
-    market text not null,
-    source_file text not null,
-    event_name text not null,
-    fight_id text not null default '',
-    source_event_id text,
-    event_raw text,
-    event_url text,
-    fighter text not null,
-    source_fighter_id text not null default '',
-    sherdog_fighter_id bigint,
-    fighter_identity_key text not null default '',
-    sportsbook text not null,
-    odds_american integer not null,
-    scraped_at timestamptz not null,
-    inserted_at timestamptz not null default now(),
-    updated_at timestamptz not null default now(),
-    primary key (source, market, source_file, event_name, fight_id, fighter, sportsbook)
-);
-
-create table if not exists public.ufc_latest_odds (
-    source text not null,
-    market text not null,
-    event_name text not null,
-    fight_id text not null default '',
-    source_event_id text,
-    event_raw text,
-    event_url text,
-    fighter text not null,
-    source_fighter_id text not null default '',
-    sherdog_fighter_id bigint,
-    fighter_identity_key text not null default '',
-    sportsbook text not null,
-    odds_american integer not null,
-    scraped_at timestamptz not null,
-    source_file text not null,
-    updated_at timestamptz not null default now(),
-    primary key (source, market, event_name, fight_id, fighter, sportsbook)
-);
-
 create table if not exists public.ufc_odds_line_history (
     source text not null,
     market text not null,
@@ -128,39 +91,6 @@ create table if not exists public.ufc_odds_line_history (
     primary key (source, market, event_name, fight_id, fighter, sportsbook, valid_from)
 );
 
-alter table public.ufc_latest_odds
-add column if not exists fight_id text not null default '';
-
-alter table public.ufc_latest_odds
-drop constraint if exists ufc_latest_odds_pkey;
-
-alter table public.ufc_latest_odds
-add primary key (source, market, event_name, fight_id, fighter, sportsbook);
-
-alter table public.ufc_odds_history
-add column if not exists source_event_id text;
-
-alter table public.ufc_odds_history
-add column if not exists source_fighter_id text not null default '';
-
-alter table public.ufc_odds_history
-add column if not exists sherdog_fighter_id bigint;
-
-alter table public.ufc_odds_history
-add column if not exists fighter_identity_key text not null default '';
-
-alter table public.ufc_latest_odds
-add column if not exists source_event_id text;
-
-alter table public.ufc_latest_odds
-add column if not exists source_fighter_id text not null default '';
-
-alter table public.ufc_latest_odds
-add column if not exists sherdog_fighter_id bigint;
-
-alter table public.ufc_latest_odds
-add column if not exists fighter_identity_key text not null default '';
-
 alter table public.ufc_odds_line_history
 add column if not exists source_event_id text;
 
@@ -183,25 +113,11 @@ create table if not exists public.ufc_odds_ingest_runs (
     created_at timestamptz not null default now()
 );
 
-alter table public.ufc_latest_odds enable row level security;
-alter table public.ufc_odds_history enable row level security;
 alter table public.ufc_odds_line_history enable row level security;
 alter table public.ufc_odds_ingest_runs enable row level security;
 
-drop policy if exists "read ufc latest odds" on public.ufc_latest_odds;
-drop policy if exists "read ufc odds history" on public.ufc_odds_history;
 drop policy if exists "read ufc odds line history" on public.ufc_odds_line_history;
 drop policy if exists "read ufc odds ingest runs" on public.ufc_odds_ingest_runs;
-
-create policy "read ufc latest odds"
-on public.ufc_latest_odds for select
-to anon, authenticated
-using (true);
-
-create policy "read ufc odds history"
-on public.ufc_odds_history for select
-to anon, authenticated
-using (true);
 
 create policy "read ufc odds line history"
 on public.ufc_odds_line_history for select
@@ -213,30 +129,12 @@ on public.ufc_odds_ingest_runs for select
 to anon, authenticated
 using (true);
 
-revoke all on table public.ufc_latest_odds from anon, authenticated;
-revoke all on table public.ufc_odds_history from anon, authenticated;
 revoke all on table public.ufc_odds_line_history from anon, authenticated;
 revoke all on table public.ufc_odds_ingest_runs from anon, authenticated;
-grant select on public.ufc_latest_odds to anon, authenticated;
-grant select on public.ufc_odds_history to anon, authenticated;
 grant select on public.ufc_odds_line_history to anon, authenticated;
 grant select on public.ufc_odds_ingest_runs to anon, authenticated;
-grant all on public.ufc_latest_odds to service_role;
-grant all on public.ufc_odds_history to service_role;
 grant all on public.ufc_odds_line_history to service_role;
 grant all on public.ufc_odds_ingest_runs to service_role;
-
-create index if not exists idx_ufc_odds_history_fighter_scraped_at
-on public.ufc_odds_history (fighter, scraped_at);
-
-create index if not exists idx_ufc_odds_history_sherdog_fighter_scraped_at
-on public.ufc_odds_history (sherdog_fighter_id, scraped_at);
-
-create index if not exists idx_ufc_latest_odds_sherdog_fighter
-on public.ufc_latest_odds (sherdog_fighter_id);
-
-create index if not exists idx_ufc_odds_history_source_file
-on public.ufc_odds_history (source_file);
 
 create index if not exists idx_ufc_odds_line_history_fighter_valid_from
 on public.ufc_odds_line_history (fighter, valid_from);
@@ -256,9 +154,7 @@ class SupabaseConfig:
         self,
         url,
         service_role_key,
-        history_table=DEFAULT_HISTORY_TABLE,
         line_history_table=DEFAULT_LINE_HISTORY_TABLE,
-        latest_table=DEFAULT_LATEST_TABLE,
         ingest_table=DEFAULT_INGEST_TABLE,
         fighters_table=DEFAULT_FIGHTERS_TABLE,
         fighter_source_map_table=DEFAULT_FIGHTER_SOURCE_MAP_TABLE,
@@ -267,9 +163,7 @@ class SupabaseConfig:
     ):
         self.url = (url or "").rstrip("/")
         self.service_role_key = service_role_key or ""
-        self.history_table = history_table
         self.line_history_table = line_history_table
-        self.latest_table = latest_table
         self.ingest_table = ingest_table
         self.fighters_table = fighters_table
         self.fighter_source_map_table = fighter_source_map_table
@@ -1042,53 +936,6 @@ def publish_identity_rows(config, rows, session, chunk_size):
         )
 
 
-def publish_rows(
-    config,
-    rows,
-    session=None,
-    dry_run=True,
-    chunk_size=500,
-    csv_paths=None,
-    skipped_files=None,
-):
-    rows = list(rows)
-    csv_paths = list(csv_paths or [])
-    if not csv_paths:
-        csv_paths = [Path(row["source_file"]) for row in rows[:1] if row.get("source_file")]
-
-    result = build_publish_result(
-        dry_run=dry_run,
-        rows=rows,
-        csv_paths=csv_paths,
-        history_table=config.history_table,
-        ingest_table=config.ingest_table,
-        skipped_files=skipped_files,
-    )
-    if dry_run:
-        return result
-
-    if not config.url or not config.service_role_key:
-        raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for live publish.")
-
-    session = session or requests.Session()
-    publish_identity_rows(config, rows, session, chunk_size)
-    for batch in chunked(rows, chunk_size):
-        post_rest(
-            session,
-            config,
-            config.history_table,
-            batch,
-            params={"on_conflict": HISTORY_ON_CONFLICT},
-            prefer="resolution=merge-duplicates,return=minimal",
-        )
-
-    ingest_payload = ingest_payload_from_rows(rows)
-    if ingest_payload:
-        post_rest(session, config, config.ingest_table, ingest_payload, prefer="return=minimal")
-
-    return result
-
-
 def publish_line_rows(
     config,
     rows,
@@ -1182,9 +1029,7 @@ def publish_line_rows(
 
 
 def build_config_from_env(
-    history_table=DEFAULT_HISTORY_TABLE,
     line_history_table=DEFAULT_LINE_HISTORY_TABLE,
-    latest_table=DEFAULT_LATEST_TABLE,
     ingest_table=DEFAULT_INGEST_TABLE,
 ):
     url = os.environ.get("SUPABASE_URL")
@@ -1199,9 +1044,7 @@ def build_config_from_env(
     return SupabaseConfig(
         url,
         service_role_key,
-        history_table=history_table,
         line_history_table=line_history_table,
-        latest_table=latest_table,
         ingest_table=ingest_table,
     )
 
@@ -1230,17 +1073,13 @@ def load_rows_from_csvs(csv_paths, skip_invalid=False):
 def config_from_args(args, live):
     if live:
         return build_config_from_env(
-            args.history_table,
-            args.line_history_table,
-            args.latest_table,
-            args.ingest_table,
+            line_history_table=args.line_history_table,
+            ingest_table=args.ingest_table,
         )
     return SupabaseConfig(
         "",
         "",
-        history_table=args.history_table,
         line_history_table=args.line_history_table,
-        latest_table=args.latest_table,
         ingest_table=args.ingest_table,
     )
 
@@ -1276,12 +1115,14 @@ def main(argv=None):
     parser.add_argument("--csv-path", type=Path)
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     parser.add_argument("--all", "--backfill", dest="backfill_all", action="store_true")
-    parser.add_argument("--history-table", default=DEFAULT_HISTORY_TABLE)
     parser.add_argument("--line-history-table", default=DEFAULT_LINE_HISTORY_TABLE)
-    parser.add_argument("--latest-table", default=DEFAULT_LATEST_TABLE)
     parser.add_argument("--ingest-table", default=DEFAULT_INGEST_TABLE)
     parser.add_argument("--chunk-size", type=int, default=500)
-    parser.add_argument("--line-history", action="store_true", help="Publish compact odds line-history segments.")
+    parser.add_argument(
+        "--line-history",
+        action="store_true",
+        help="Required to publish. Writes compact ufc_odds_line_history segments; snapshot tables are retired.",
+    )
     parser.add_argument("--live", action="store_true", help="Actually upsert rows into Supabase.")
     parser.add_argument(
         "--prune-line-history",
@@ -1337,6 +1178,8 @@ def main(argv=None):
         raise SystemExit("Use either --csv-path or --all, not both.")
 
     prune_only = (args.prune_line_history or args.prune_ingest_runs) and not args.line_history
+    if not prune_only and not args.line_history:
+        raise SystemExit(SNAPSHOT_PUBLISH_RETIRED)
     if prune_only:
         if args.csv_path or args.backfill_all:
             raise SystemExit("Prune-only mode does not take --csv-path or --all.")
@@ -1373,16 +1216,13 @@ def main(argv=None):
         "csv_paths": csv_paths,
         "skipped_files": skipped_files,
     }
-    if args.line_history:
-        result = publish_line_rows(
-            config,
-            rows,
-            retain_days=retain_days,
-            ingest_retain_days=ingest_retain_days,
-            **publish_kwargs,
-        )
-    else:
-        result = publish_rows(config, rows, **publish_kwargs)
+    result = publish_line_rows(
+        config,
+        rows,
+        retain_days=retain_days,
+        ingest_retain_days=ingest_retain_days,
+        **publish_kwargs,
+    )
     print(json.dumps(result, indent=2))
     return 0
 
