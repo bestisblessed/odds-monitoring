@@ -45,6 +45,12 @@ LINE_HISTORY_RETAIN_DAYS_ENV = "UFC_LINE_HISTORY_RETAIN_DAYS"
 INGEST_RUNS_RETAIN_DAYS_ENV = "UFC_INGEST_RUNS_RETAIN_DAYS"
 LINE_HISTORY_PRUNE_COLUMN = "last_seen_at"
 INGEST_RUNS_PRUNE_COLUMN = "created_at"
+PRUNE_ALLOWED_TARGETS = frozenset(
+    {
+        (DEFAULT_LINE_HISTORY_TABLE, LINE_HISTORY_PRUNE_COLUMN),
+        (DEFAULT_INGEST_TABLE, INGEST_RUNS_PRUNE_COLUMN),
+    }
+)
 BASE_COLUMNS = {
     "Event",
     "Event_URL",
@@ -593,14 +599,26 @@ def prune_filter(timestamp_column, cutoff):
 
 
 def assert_prune_allowed(config, table_name, timestamp_column):
-    allowed = {
-        (config.line_history_table, LINE_HISTORY_PRUNE_COLUMN),
-        (config.ingest_table, INGEST_RUNS_PRUNE_COLUMN),
-    }
-    if (table_name, timestamp_column) not in allowed:
+    """Allow deletes only on the literal default tables, not CLI/config aliases."""
+    requested = (table_name, timestamp_column)
+    if requested not in PRUNE_ALLOWED_TARGETS:
         raise ValueError(
             f"Refusing to prune {table_name} by {timestamp_column}; "
-            "only line-history last_seen_at and ingest created_at are allowed."
+            f"only {DEFAULT_LINE_HISTORY_TABLE}.{LINE_HISTORY_PRUNE_COLUMN} and "
+            f"{DEFAULT_INGEST_TABLE}.{INGEST_RUNS_PRUNE_COLUMN} are allowed."
+        )
+    if (
+        table_name == DEFAULT_LINE_HISTORY_TABLE
+        and config.line_history_table != DEFAULT_LINE_HISTORY_TABLE
+    ):
+        raise ValueError(
+            f"Refusing to prune {table_name}; config line_history_table is "
+            f"{config.line_history_table!r}, not {DEFAULT_LINE_HISTORY_TABLE}."
+        )
+    if table_name == DEFAULT_INGEST_TABLE and config.ingest_table != DEFAULT_INGEST_TABLE:
+        raise ValueError(
+            f"Refusing to prune {table_name}; config ingest_table is "
+            f"{config.ingest_table!r}, not {DEFAULT_INGEST_TABLE}."
         )
 
 

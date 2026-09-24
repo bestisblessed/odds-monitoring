@@ -675,6 +675,81 @@ class SupabaseOddsPublisherTests(unittest.TestCase):
                 )
         self.assertEqual(session.deletes, [])
 
+    def test_prune_refuses_when_config_renames_protected_tables(self):
+        module = load_module()
+        now = datetime(2026, 9, 24, 12, 0, tzinfo=timezone.utc)
+        blocked_tables = [
+            "ufc_fighters",
+            "ufc_fighter_source_map",
+            "ufc_source_fights",
+            "ufc_latest_odds",
+            "ufc_odds_line_histroy",
+        ]
+
+        for bad_table in blocked_tables:
+            session = FakeSession()
+            renamed_line_config = module.SupabaseConfig(
+                url="https://example.supabase.co/",
+                service_role_key="service-key",
+                line_history_table=bad_table,
+            )
+            with self.assertRaises(ValueError):
+                module.prune_stale_line_history(
+                    session,
+                    renamed_line_config,
+                    retain_days=14,
+                    dry_run=False,
+                    now=now,
+                )
+            with self.assertRaises(ValueError):
+                module.prune_stale_table_rows(
+                    session,
+                    renamed_line_config,
+                    renamed_line_config.line_history_table,
+                    module.LINE_HISTORY_PRUNE_COLUMN,
+                    14,
+                    dry_run=False,
+                    now=now,
+                )
+            self.assertEqual(session.deletes, [])
+            self.assertEqual(session.posts, [])
+
+            session = FakeSession()
+            renamed_ingest_config = module.SupabaseConfig(
+                url="https://example.supabase.co/",
+                service_role_key="service-key",
+                ingest_table=bad_table,
+            )
+            with self.assertRaises(ValueError):
+                module.prune_stale_ingest_runs(
+                    session,
+                    renamed_ingest_config,
+                    retain_days=30,
+                    dry_run=False,
+                    now=now,
+                )
+            self.assertEqual(session.deletes, [])
+            self.assertEqual(session.posts, [])
+
+        session = FakeSession(
+            get_payloads=[[{"last_seen_at": "2026-09-24T12:00:00+00:00"}], []]
+        )
+        live_renamed = module.SupabaseConfig(
+            url="https://example.supabase.co/",
+            service_role_key="service-key",
+            line_history_table="ufc_fighters",
+        )
+        with self.assertRaises(ValueError):
+            module.publish_line_rows(
+                live_renamed,
+                [{"source_file": "latest.csv", "scraped_at": "2026-09-24T12:00:00+00:00"}],
+                session=session,
+                dry_run=False,
+                retain_days=14,
+                now=now,
+            )
+        self.assertEqual(session.deletes, [])
+
     def test_publish_line_rows_dry_run_reports_prune_filter_without_deleting(self):
         module = load_module()
         session = FakeSession()
