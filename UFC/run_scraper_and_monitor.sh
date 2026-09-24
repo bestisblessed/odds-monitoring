@@ -24,6 +24,8 @@ if [ "$SCRAPE_MONEYLINES" = true ]; then
     echo "Scraping moneylines..."
      /home/durrrrr/.pyenv/shims/python "${SCRIPT_DIR}/Scraping/ufc_v2.py" >> "${SCRIPT_DIR}/Scraping/log.log" 2>&1
     echo "Appending latest moneylines to compact Supabase line history..."
+    # Live line-history publish also deletes ufc_odds_line_history rows with
+    # last_seen_at older than 14 days (UFC_LINE_HISTORY_RETAIN_DAYS / --retain-days).
     if ! /home/durrrrr/.pyenv/shims/python "${SCRIPT_DIR}/Scraping/supabase_odds_publisher.py" --line-history --live >> "${SCRIPT_DIR}/Scraping/supabase_publish.log" 2>&1; then
         echo "Supabase odds publish failed; continuing to monitoring." >> "${SCRIPT_DIR}/Scraping/supabase_publish.log"
     fi
