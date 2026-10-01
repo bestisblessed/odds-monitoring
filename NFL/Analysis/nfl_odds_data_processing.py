@@ -184,7 +184,7 @@ def main():
     output = os.path.join(args.data_dir, "nfl_odds_movements.csv")
     frame = process_directory(odds_dir, output)
 
-    default_start = (datetime.now() - timedelta(days=7)).strftime("%Y%m%d")
+    default_start = datetime.now().strftime("%Y%m%d")
     start_date = args.start_date or input(f"Enter start date (YYYYMMDD) [press Enter for {default_start}]: ").strip() or default_start
     default_end = (datetime.strptime(start_date, "%Y%m%d") + timedelta(days=7)).strftime("%Y%m%d")
     end_date = args.end_date or input(f"Enter end date (YYYYMMDD) [press Enter for {default_end}]: ").strip() or default_end
