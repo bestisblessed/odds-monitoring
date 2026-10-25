@@ -1,31 +1,27 @@
 #!/bin/bash
 
+set -euo pipefail
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NFL_ANALYSIS_DIR="$SCRIPT_DIR/NFL/Analysis"
 NFL_AI_ROOT="$(cd "$SCRIPT_DIR/../nfl-ai" && pwd)"
 STREAMLIT_ODDS_DIR="$NFL_AI_ROOT/Websites/Streamlit/data/odds"
 
-### Zip NFL Data ###
+# NFL AI Odds Scraper collects on donpablo; refresh locally or pull from it.
+source "$SCRIPT_DIR/scripts/odds_runtime.sh"
+cd "$SCRIPT_DIR"
+if [[ "$ODDS_SOURCE_ROOT" != "$SCRIPT_DIR" ]]; then
+    mkdir -p NFL/Scraping/data
+    rsync -a --delay-updates "$ODDS_SOURCE_ROOT/NFL/Scraping/data/" NFL/Scraping/data/
+fi
 current_date=$(date +%b_%d_%y | tr '[:lower:]' '[:upper:]')
 mkdir -p zips
-ssh durrrrr "cd /home/durrrrr/odds-monitoring && \
-    mkdir -p zips && \
-    zip -r zips/nfl_backup_${current_date}.zip NFL/Scraping/data/ && \
-    echo 'NFL backup created on durrrrr'"
-
-### Unzip NFL Data ###
-current_date=$(date +%b_%d_%y | tr '[:lower:]' '[:upper:]')
-rsync -av durrrrr:/home/durrrrr/odds-monitoring/zips/ zips/
-mkdir -p NFL/Scraping/data
-unzip -o zips/nfl_backup_${current_date}.zip "NFL/Scraping/data/*" -d ./
-echo "Restored: NFL/Scraping/data/"
-
-# DELETE REMOTE NFL ODDS DATA FILES
-#ssh durrrrr "rm -rf /home/durrrrr/odds-monitoring/NFL/Scraping/data/* && echo 'Cleared NFL data files on durrrrr'"
+zip -rq "zips/nfl_backup_${current_date}.zip" NFL/Scraping/data/
+echo "NFL backup created from local snapshots"
 
 cd "$NFL_ANALYSIS_DIR"
-python nfl_odds_data_processing.py
-python nfl_odds_data_analysis.py
+"$PYTHON" nfl_odds_data_processing.py
+"$PYTHON" nfl_odds_data_analysis.py
 
 ### Copy odds data files to nfl-ai directory ###
 mkdir -p "$STREAMLIT_ODDS_DIR"

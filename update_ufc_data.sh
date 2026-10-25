@@ -3,7 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SYNC_SOURCE="durrrrr:/home/durrrrr/odds-monitoring/UFC/Scraping/data/"
+source "$ROOT/scripts/odds_runtime.sh"
+SYNC_SOURCE="$ODDS_SOURCE_ROOT/UFC/Scraping/data/"
 DATA_DIR="$ROOT/UFC/Scraping/data"
 OUTPUT="$ROOT/UFC/Analysis/data/ufc_odds_movements_fightoddsio.csv"
 STATE=""
@@ -16,12 +17,12 @@ usage() {
 Usage: ./update_ufc_data.sh [options]
 
 Options:
-  --sync-source SOURCE  Rsync source directory (default: durrrrr UFC data)
+  --sync-source SOURCE  Rsync source directory (default: local on donpablo, otherwise donpablo UFC data)
   --data-dir PATH       Local raw snapshot mirror
   --output PATH         Generated movement CSV
   --state PATH          Incremental checkpoint JSON
   --full-rebuild        Rebuild movements from every snapshot
-  --local-only          Skip Streamlit, Swift, and DonPablo delivery
+  --local-only          Skip Streamlit and Swift delivery
   -h, --help            Show this help
 EOF
 }
@@ -101,14 +102,18 @@ fi
 
 mkdir -p "$DATA_DIR" "$(dirname "$OUTPUT")" "$(dirname "$STATE")"
 
-echo "Syncing UFC snapshots without deleting local history..."
+echo "Loading UFC snapshots without deleting local history..."
 sync_started=$SECONDS
-rsync -a \
-    --delay-updates \
-    --stats \
-    --include='ufc_odds_fightoddsio_*.csv' \
-    --exclude='*' \
-    "$SYNC_SOURCE" "$DATA_DIR/"
+if [[ "$SYNC_SOURCE" != *:* && "$(cd "${SYNC_SOURCE%/}" && pwd -P)" == "$(cd "$DATA_DIR" && pwd -P)" ]]; then
+    echo "Using local snapshots: $DATA_DIR"
+else
+    rsync -a \
+        --delay-updates \
+        --stats \
+        --include='ufc_odds_fightoddsio_*.csv' \
+        --exclude='*' \
+        "$SYNC_SOURCE" "$DATA_DIR/"
+fi
 phase_done "sync" "$sync_started"
 
 snapshot_count=$(find "$DATA_DIR" -maxdepth 1 -type f -name 'ufc_odds_fightoddsio_*.csv' | wc -l | tr -d ' ')
@@ -129,7 +134,7 @@ processor_args=(
 if [[ "$FULL_REBUILD" -eq 1 ]]; then
     processor_args+=(--full-rebuild)
 fi
-python "${processor_args[@]}"
+"$PYTHON" "${processor_args[@]}"
 phase_done "processing" "$processor_started"
 
 [[ -s "$OUTPUT" ]] || die "Movement output was not created: $OUTPUT"
@@ -141,12 +146,11 @@ output_sha=$(sha256_file "$OUTPUT")
 echo "Validated output: rows=$(wc -l < "$OUTPUT" | tr -d ' ') sha256=$output_sha"
 
 if [[ "$LOCAL_ONLY" -eq 1 ]]; then
-    echo "Local-only mode: skipped Streamlit, Swift, and DonPablo delivery"
+    echo "Local-only mode: skipped Streamlit and Swift delivery"
 else
     delivery_started=$SECONDS
-    streamlit_target="/Users/td/Code/mma-ai/Streamlit/data/ufc_odds_movements_fightoddsio.csv"
-    swift_target="/Users/td/Code/mma-ai-swift-app/data/ufc_odds_movements_fightoddsio.csv"
-    remote_target="/Users/pablo/Code/mma-ai-swift-app/data/ufc_odds_movements_fightoddsio.csv"
+    streamlit_target="$ROOT/../mma-ai/Streamlit/data/ufc_odds_movements_fightoddsio.csv"
+    swift_target="$ROOT/../mma-ai-swift-app/data/ufc_odds_movements_fightoddsio.csv"
     [[ -d "$(dirname "$streamlit_target")" ]] || die "Streamlit data directory is missing"
     [[ -d "$(dirname "$swift_target")" ]] || die "Swift data directory is missing"
 
@@ -155,10 +159,13 @@ else
     [[ "$(sha256_file "$streamlit_target")" == "$output_sha" ]] || die "Streamlit checksum mismatch"
     [[ "$(sha256_file "$swift_target")" == "$output_sha" ]] || die "Swift checksum mismatch"
 
-    echo "Copying to Swift app server..."
-    scp "$OUTPUT" "donpablo:$remote_target"
-    remote_sha=$(ssh donpablo "shasum -a 256 '$remote_target' | awk '{print \$1}'")
-    [[ "$remote_sha" == "$output_sha" ]] || die "DonPablo checksum mismatch"
+    # Preserve delivery to the Swift backend when refreshing on another Mac.
+    if [[ "$(hostname -s)" != "DonPabloMBP" ]]; then
+        remote_target="/Users/pablo/Code/mma-ai-swift-app/data/ufc_odds_movements_fightoddsio.csv"
+        scp "$OUTPUT" "donpablo:$remote_target"
+        remote_sha=$(ssh donpablo "shasum -a 256 '$remote_target' | awk '{print \$1}'")
+        [[ "$remote_sha" == "$output_sha" ]] || die "DonPablo checksum mismatch"
+    fi
     phase_done "delivery" "$delivery_started"
 fi
 

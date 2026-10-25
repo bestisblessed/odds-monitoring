@@ -1,0 +1,130 @@
+query OddsEventMenuQrQuery {
+  promotions: allPromotions(isActive: true) {
+    ...OddsEventMenu_promotions
+  }
+  upcomingEvents: allEvents(upcoming: true, orderBy: "date", isCancelled: false) {
+    ...OddsEventMenu_events
+    edges {
+      node {
+        straightOfferCount
+        promotion {
+          id
+        }
+        id
+      }
+    }
+  }
+  sportsbooks: allSportsbooks(hasOdds: true) {
+    ...OddsEventMenu_sportsbooks
+  }
+  eventOfferTable(nextEvent: true, isCancelled: false) {
+    ...OddsEventMenu_eventOfferTable
+    id
+  }
+}
+
+fragment EventOfferTable_eventOfferTable on EventOfferTableNode {
+  name
+  pk
+  fightOffers {
+    edges {
+      node {
+        id
+        fighter1 {
+          firstName
+          lastName
+          slug
+          id
+        }
+        fighter2 {
+          firstName
+          lastName
+          slug
+          id
+        }
+        bestOdds1
+        bestOdds2
+        slug
+        propCount
+        isCancelled
+        straightOffers {
+          edges {
+            node {
+              sportsbook {
+                id
+                shortName
+                slug
+              }
+              outcome1 {
+                id
+                odds
+                ...OddsWithArrowButton_outcome
+              }
+              outcome2 {
+                id
+                odds
+                ...OddsWithArrowButton_outcome
+              }
+              id
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+fragment EventOfferTable_sportsbooks on SportsbookNodeConnection {
+  edges {
+    node {
+      id
+      shortName
+      slug
+    }
+  }
+}
+
+fragment OddsEventMenu_eventOfferTable on EventOfferTableNode {
+  pk
+  ...EventOfferTable_eventOfferTable
+}
+
+fragment OddsEventMenu_events on EventNodeConnection {
+  edges {
+    node {
+      pk
+      id
+      name
+      slug
+      date
+      straightOfferCount
+      promotion {
+        id
+      }
+    }
+  }
+}
+
+fragment OddsEventMenu_promotions on PromotionNodeConnection {
+  edges {
+    node {
+      id
+      shortName
+      logo
+    }
+  }
+}
+
+fragment OddsEventMenu_sportsbooks on SportsbookNodeConnection {
+  ...EventOfferTable_sportsbooks
+}
+
+fragment OddsWithArrowButton_outcome on OutcomeNode {
+  id
+  ...OddsWithArrow_outcome
+}
+
+fragment OddsWithArrow_outcome on OutcomeNode {
+  odds
+  oddsPrev
+}

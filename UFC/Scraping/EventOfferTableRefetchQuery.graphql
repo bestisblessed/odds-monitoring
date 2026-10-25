@@ -1,0 +1,86 @@
+query EventOfferTableRefetchQuery(
+  $eventPk: Int!
+  $isCancelled: Boolean
+) {
+  sportsbooks: allSportsbooks(hasOdds: true) {
+    ...EventOfferTable_sportsbooks
+  }
+  eventOfferTable(pk: $eventPk, isCancelled: $isCancelled) {
+    slug
+    pk
+    name
+    ...EventOfferTable_eventOfferTable
+    id
+  }
+}
+
+fragment EventOfferTable_eventOfferTable on EventOfferTableNode {
+  name
+  pk
+  fightOffers {
+    edges {
+      node {
+        id
+        fighter1 {
+          firstName
+          lastName
+          slug
+          id
+        }
+        fighter2 {
+          firstName
+          lastName
+          slug
+          id
+        }
+        bestOdds1
+        bestOdds2
+        slug
+        propCount
+        isCancelled
+        straightOffers {
+          edges {
+            node {
+              sportsbook {
+                id
+                shortName
+                slug
+              }
+              outcome1 {
+                id
+                odds
+                ...OddsWithArrowButton_outcome
+              }
+              outcome2 {
+                id
+                odds
+                ...OddsWithArrowButton_outcome
+              }
+              id
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+fragment EventOfferTable_sportsbooks on SportsbookNodeConnection {
+  edges {
+    node {
+      id
+      shortName
+      slug
+    }
+  }
+}
+
+fragment OddsWithArrowButton_outcome on OutcomeNode {
+  id
+  ...OddsWithArrow_outcome
+}
+
+fragment OddsWithArrow_outcome on OutcomeNode {
+  odds
+  oddsPrev
+}

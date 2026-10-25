@@ -16,3 +16,7 @@ bak/
 __pycache__*
 *DS_Store*
 .vscode/
+
+.venv/
+.cache/
+.run/

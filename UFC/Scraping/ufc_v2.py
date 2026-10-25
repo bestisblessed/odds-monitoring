@@ -2,6 +2,8 @@
 Produces the same CSV format as ufc.py for compatibility with the monitoring script.
 """
 import os
+import base64
+from pathlib import Path
 import re
 import requests
 import pandas as pd
@@ -35,67 +37,41 @@ def gql_query(query, variables=None):
     resp.raise_for_status()
     result = resp.json()
     if "errors" in result:
-        print(f"GraphQL errors: {result['errors']}")
+        raise RuntimeError(f"GraphQL errors: {result['errors']}")
     return result.get("data")
 
 
 def fetch_upcoming_events():
     """Fetch all upcoming events with their PKs and promotion info."""
-    query = """
-    query {
-      upcomingEvents: allEvents(upcoming: true, orderBy: "date", isCancelled: false) {
-        edges {
-          node {
-            pk
-            name
-            slug
-            date
-            straightOfferCount
-            promotion { shortName }
-          }
-        }
-      }
-    }
-    """
+    # Exact public operations shipped by https://fightodds.io/app.61d526cc.js.
+    # The API now rejects arbitrary GraphQL selection sets with "Unknown query".
+    query = Path(script_dir, "OddsEventMenuQrQuery.graphql").read_text()
     data = gql_query(query)
     if not data:
-        return []
-    return [edge["node"] for edge in data["upcomingEvents"]["edges"]]
+        raise RuntimeError("FightOdds returned no event data")
+    promotions = {edge["node"]["id"]: edge["node"] for edge in data["promotions"]["edges"]}
+    events = []
+    for edge in data["upcomingEvents"]["edges"]:
+        event = dict(edge["node"])
+        event["promotion"] = promotions.get(event["promotion"]["id"], {})
+        events.append(event)
+    return events
 
 
 def fetch_event_odds(pk):
-    """Fetch moneyline odds for a specific event by PK."""
-    query = """
-    query ($pk: Int) {
-      eventOfferTable(pk: $pk, isCancelled: false) {
-        name
-        pk
-        fightOffers {
-          edges {
-            node {
-              fighter1 { id firstName lastName sherdogId sherdogUrl }
-              fighter2 { id firstName lastName sherdogId sherdogUrl }
-              fight { id slug }
-              isCancelled
-              straightOffers {
-                edges {
-                  node {
-                    sportsbook { shortName slug }
-                    outcome1 { odds }
-                    outcome2 { odds }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    """
-    data = gql_query(query, {"pk": pk})
+    """Fetch the website's public odds table, retaining canonical FightNode IDs."""
+    query = Path(script_dir, "EventOfferTableRefetchQuery.graphql").read_text()
+    data = gql_query(query, {"eventPk": pk, "isCancelled": False})
     if not data or not data.get("eventOfferTable"):
-        return None
-    return data["eventOfferTable"]
+        raise RuntimeError(f"FightOdds returned no odds table for event {pk}")
+    table = data["eventOfferTable"]
+    for edge in table["fightOffers"]["edges"]:
+        fight = edge["node"]
+        node_type, fight_pk = base64.b64decode(fight["id"]).decode().split(":", 1)
+        if node_type != "FightOfferTableNode" or not fight_pk.isdigit():
+            raise ValueError(f"Unexpected FightOdds fight identity: {node_type}")
+        fight["fight"] = {"id": base64.b64encode(f"FightNode:{fight_pk}".encode()).decode()}
+    return table
 
 
 def format_event_name(event_name, event_date, fight_count):
@@ -260,10 +236,11 @@ try:
         fightodds_data.to_csv(fightodds_file, index=False)
         print("FightOdds data scraped and saved.")
     else:
-        print("FightOdds scrape returned no data.")
+        raise RuntimeError("FightOdds scrape returned no data; no snapshot saved")
 except Exception as e:
     print(f"FightOdds scrape failed: {e}")
     import traceback
     traceback.print_exc()
+    raise
 
 print("UFC cron script finished (v2 - API)")

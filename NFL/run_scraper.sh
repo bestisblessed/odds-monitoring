@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PYTHON="/home/durrrrr/.pyenv/shims/python"
+source "$SCRIPT_DIR/../scripts/odds_runtime.sh"
 LOG_FILE="${SCRIPT_DIR}/Scraping/log.log"
 
 mkdir -p "${SCRIPT_DIR}/Scraping/data/odds"

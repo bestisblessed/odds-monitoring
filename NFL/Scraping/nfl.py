@@ -30,7 +30,8 @@ if chromedriver_path is None:
     try:
         chromedriver_path = subprocess.check_output(['which', 'chromedriver']).strip().decode('utf-8')
     except subprocess.CalledProcessError:
-        raise RuntimeError("ChromeDriver not found. Please ensure it is installed and in your PATH.")
+        # Selenium Manager resolves a driver matching the installed Chrome.
+        chromedriver_path = None
 
 print(f"Using ChromeDriver at: {chromedriver_path}")
 chrome_options = Options()
@@ -43,7 +44,7 @@ chrome_options.add_experimental_option("prefs", {
     "download.default_directory": "/tmp",
     "download.prompt_for_download": False
 })
-service = Service(chromedriver_path)
+service = Service(chromedriver_path) if chromedriver_path else Service()
 driver = webdriver.Chrome(service=service, options=chrome_options)
 
 
@@ -183,10 +184,13 @@ except Exception as e:
     print(f"An error occurred: {e}")
     import traceback
     traceback.print_exc()
+    raise
 finally:
     driver.quit()
     # Clean up temporary Chrome directory
     os.system("rm -rf /tmp/chrome-temp-nfl-*")
+if not data:
+    raise RuntimeError("NFL odds scrape returned no rows; refusing to save an empty snapshot")
 timestamp = datetime.now().strftime("%Y%m%d_%H%M")
 script_dir = os.path.dirname(os.path.abspath(__file__))
 filename = os.path.join(script_dir, 'data', 'odds', f'nfl_odds_vsin_{timestamp}.json')
