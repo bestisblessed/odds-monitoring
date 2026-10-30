@@ -7,6 +7,19 @@
 python UFC/Scraping/supabase_odds_publisher.py --line-history --live
 ```
 
+## Fighter identity
+
+The odds-table operation omits Sherdog identity fields. The scraper also calls
+FightOdds' registered `CappingTableRefetchQuery` and joins profiles by the
+FightOdds fighter ID, extracting the canonical ID from `sherdogUrl`. Keep the
+registered GraphQL operation intact; arbitrary selection sets are rejected.
+Missing response fields abort the scrape. A profile with no Sherdog URL remains
+unresolved; names are never used to guess an ID.
+
+Before writing odds segments or source fights, the publisher enriches rows from
+`ufc_fighter_source_map`, preserves previously resolved IDs, and rejects
+conflicting mappings. App consumers continue to match on Sherdog IDs.
+
 ## Line-history retention
 
 `ufc_odds_line_history` keeps compact odds segments. After a successful live

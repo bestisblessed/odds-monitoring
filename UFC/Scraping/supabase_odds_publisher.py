@@ -871,7 +871,7 @@ def publish_identity_rows(config, rows, session, chunk_size):
             config,
             config.fighter_source_map_table,
             {
-                "select": "source,source_fighter_id,sherdog_fighter_id,resolution_status,first_seen_at,last_seen_at",
+                "select": "source,source_fighter_id,sherdog_fighter_id,resolution_status,resolution_method,first_seen_at,last_seen_at",
                 "source": "eq.fightoddsio",
                 "source_fighter_id": f"in.({','.join(quote_postgrest_value(value) for value in source_ids)})",
                 "limit": str(len(source_ids)),
@@ -907,6 +907,20 @@ def publish_identity_rows(config, rows, session, chunk_size):
             if existing_last_seen and payload.get("last_seen_at") < existing_last_seen:
                 payload["last_seen_at"] = existing_last_seen
 
+    # Carry canonical IDs into both odds segments and source-fight records,
+    # not just the mapping-table payload. Never replace a known ID with null.
+    resolved_ids = {
+        (item["source"], item["source_fighter_id"]): positive_int_or_none(item["sherdog_fighter_id"])
+        for item in source_maps
+    }
+    rows = [dict(row) for row in rows]
+    for row in rows:
+        fighter_id = resolved_ids.get((row.get("source", "fightoddsio"), row.get("source_fighter_id")))
+        if fighter_id:
+            row["sherdog_fighter_id"] = fighter_id
+            row["fighter_identity_key"] = f"sherdog:{fighter_id}"
+    fighters, _, source_fights = identity_payloads_from_rows(rows)
+
     for batch in chunked(fighters, chunk_size):
         post_rest(
             session,
@@ -935,6 +949,8 @@ def publish_identity_rows(config, rows, session, chunk_size):
             prefer="resolution=merge-duplicates,return=minimal",
         )
 
+    return rows
+
 
 def publish_line_rows(
     config,
@@ -959,7 +975,7 @@ def publish_line_rows(
         if not config.url or not config.service_role_key:
             raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for live publish.")
         session = session or requests.Session()
-        publish_identity_rows(config, rows, session, chunk_size)
+        rows = publish_identity_rows(config, rows, session, chunk_size)
         previous_seen_at = latest_line_seen_at(session, config)
         active_rows = fetch_active_line_rows(session, config, previous_seen_at)
         line_build = build_line_segments_for_snapshot(rows, active_rows=active_rows)
