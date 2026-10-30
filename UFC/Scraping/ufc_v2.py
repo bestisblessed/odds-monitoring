@@ -23,6 +23,288 @@ HEADERS = {
 
 TARGET_PROMOTION_KEYWORDS = ("ufc", "pfl", "lfa", "one", "oktagon", "cwfc", "cage-warriors", "brave", "ksw")
 
+# Exact registered FightOdds profile operation; keep the selection set intact.
+FIGHTER_PROFILES_QUERY = """query CappingTableRefetchQuery(
+  $eventPk: Int!
+) {
+  eventOffers: eventOfferTable(pk: $eventPk, allFights: true) {
+    ...CappingTable_eventOffers
+    id
+  }
+}
+
+fragment ButtonNotePopover_note on NoteNode {
+  note
+  ...PopoverNote_note
+}
+
+fragment CappingTable_eventOffers on EventOfferTableNode {
+  name
+  fightOffers {
+    edges {
+      node {
+        fight {
+          id
+          slug
+          isCancelled
+          fighter1 {
+            id
+            pk
+            slug
+            wikipediaUrl
+            instagram
+            fightmetricUrl
+            tapologyUrl
+            sherdogUrl
+            firstName
+            lastName
+            ...FighterFullName_fighter
+            ...FighterFlag_fighter
+            ...FighterAge_fighter
+            ...FighterRecord_fighter
+            ...FighterStance_fighter
+            ...FighterFightingStyle_fighter
+            ...FighterReach_fighter
+            ...FighterHeight_fighter
+            ...FighterWeight_fighter
+            ...FighterCamp_fighter
+            ...FighterSapm_fighter
+            ...FighterSlpm_fighter
+            ...FighterStrAcc_fighter
+            ...FighterStrDef_fighter
+            ...FighterSubAvg_fighter
+            ...FighterTdAcc_fighter
+            ...FighterTdAvg_fighter
+            ...FighterTdDef_fighter
+            ufcDebut
+            koLoss
+            weightClassChange
+            myNotes {
+              edges {
+                node {
+                  ...ButtonNotePopover_note
+                  id
+                }
+              }
+            }
+            currentCamp {
+              name
+              id
+              myNotes {
+                edges {
+                  node {
+                    ...ButtonNotePopover_note
+                    id
+                  }
+                }
+              }
+            }
+          }
+          fighter2 {
+            id
+            pk
+            slug
+            wikipediaUrl
+            instagram
+            fightmetricUrl
+            tapologyUrl
+            sherdogUrl
+            firstName
+            lastName
+            ...FighterFullName_fighter
+            ...FighterFlag_fighter
+            ...FighterAge_fighter
+            ...FighterRecord_fighter
+            ...FighterStance_fighter
+            ...FighterFightingStyle_fighter
+            ...FighterReach_fighter
+            ...FighterHeight_fighter
+            ...FighterWeight_fighter
+            ...FighterCamp_fighter
+            ...FighterSapm_fighter
+            ...FighterSlpm_fighter
+            ...FighterStrAcc_fighter
+            ...FighterStrDef_fighter
+            ...FighterSubAvg_fighter
+            ...FighterTdAcc_fighter
+            ...FighterTdAvg_fighter
+            ...FighterTdDef_fighter
+            ufcDebut
+            koLoss
+            weightClassChange
+            myNotes {
+              edges {
+                node {
+                  type
+                  ...ButtonNotePopover_note
+                  id
+                }
+              }
+            }
+            currentCamp {
+              name
+              myNotes {
+                edges {
+                  node {
+                    ...ButtonNotePopover_note
+                    id
+                  }
+                }
+              }
+              id
+            }
+          }
+          weightClass {
+            weightClass
+            id
+          }
+          myNotes {
+            edges {
+              node {
+                type
+                ...ButtonNotePopover_note
+                id
+              }
+            }
+          }
+        }
+        bestOdds1
+        bestOdds2
+        straightOffers {
+          edges {
+            node {
+              sportsbook {
+                id
+              }
+              outcome1 {
+                odds
+                ...OddsWithArrowButton_outcome
+                id
+              }
+              outcome2 {
+                odds
+                ...OddsWithArrowButton_outcome
+                id
+              }
+              id
+            }
+          }
+        }
+        id
+      }
+    }
+  }
+}
+
+fragment FighterAge_fighter on FighterNode {
+  birthDate
+  age
+}
+
+fragment FighterCamp_fighter on FighterNode {
+  camps {
+    edges {
+      node {
+        name
+        id
+      }
+    }
+  }
+}
+
+fragment FighterFightingStyle_fighter on FighterNode {
+  fightingStyle
+}
+
+fragment FighterFlag_fighter on FighterNode {
+  nationality
+}
+
+fragment FighterFullName_fighter on FighterNode {
+  firstName
+  lastName
+}
+
+fragment FighterHeight_fighter on FighterNode {
+  height
+}
+
+fragment FighterReach_fighter on FighterNode {
+  reach
+}
+
+fragment FighterRecord_fighter on FighterNode {
+  koWins
+  subWins
+  decWins
+  dqWins
+  koLosses
+  subLosses
+  decLosses
+  dqLosses
+  draws
+}
+
+fragment FighterSapm_fighter on FighterNode {
+  sapm
+}
+
+fragment FighterSlpm_fighter on FighterNode {
+  slpm
+}
+
+fragment FighterStance_fighter on FighterNode {
+  stance
+}
+
+fragment FighterStrAcc_fighter on FighterNode {
+  strAcc
+}
+
+fragment FighterStrDef_fighter on FighterNode {
+  strDef
+}
+
+fragment FighterSubAvg_fighter on FighterNode {
+  subAvg
+}
+
+fragment FighterTdAcc_fighter on FighterNode {
+  tdAcc
+}
+
+fragment FighterTdAvg_fighter on FighterNode {
+  tdAvg
+}
+
+fragment FighterTdDef_fighter on FighterNode {
+  tdDef
+}
+
+fragment FighterWeight_fighter on FighterNode {
+  weight
+}
+
+fragment Note_note on NoteNode {
+  id
+  note
+}
+
+fragment OddsWithArrowButton_outcome on OutcomeNode {
+  id
+  ...OddsWithArrow_outcome
+}
+
+fragment OddsWithArrow_outcome on OutcomeNode {
+  odds
+  oddsPrev
+}
+
+fragment PopoverNote_note on NoteNode {
+  ...Note_note
+}
+"""
+
 MONTH_NAMES = {
     1: "JANUARY", 2: "FEBRUARY", 3: "MARCH", 4: "APRIL",
     5: "MAY", 6: "JUNE", 7: "JULY", 8: "AUGUST",
@@ -58,6 +340,31 @@ def fetch_upcoming_events():
     return events
 
 
+def fetch_event_fighter_profiles(pk):
+    """Use the public profile operation; the odds-table operation omits Sherdog IDs.
+
+    Keep the operation unchanged from https://fightodds.io/app.b59da1e7.js:
+    FightOdds only accepts its registered selection sets.
+    """
+    query = FIGHTER_PROFILES_QUERY
+    data = gql_query(query, {"eventPk": pk})
+    if not data or not data.get("eventOffers"):
+        raise RuntimeError(f"FightOdds returned no fighter profiles for event {pk}")
+    profiles = {}
+    for edge in data["eventOffers"]["fightOffers"]["edges"]:
+        fight = edge["node"]["fight"]
+        for side in ("fighter1", "fighter2"):
+            fighter = fight[side]
+            source_id = fighter["id"]
+            if "sherdogUrl" not in fighter:
+                raise RuntimeError("FightOdds profile response omitted sherdogUrl; refusing an ID-less snapshot")
+            profile = {"sherdogUrl": fighter.get("sherdogUrl") or ""}
+            if source_id in profiles and profiles[source_id] != profile:
+                raise ValueError(f"Conflicting profiles for FightOdds fighter {source_id}")
+            profiles[source_id] = profile
+    return profiles
+
+
 def fetch_event_odds(pk):
     """Fetch the website's public odds table, retaining canonical FightNode IDs."""
     query = Path(script_dir, "EventOfferTableRefetchQuery.graphql").read_text()
@@ -65,8 +372,14 @@ def fetch_event_odds(pk):
     if not data or not data.get("eventOfferTable"):
         raise RuntimeError(f"FightOdds returned no odds table for event {pk}")
     table = data["eventOfferTable"]
+    profiles = fetch_event_fighter_profiles(pk)
     for edge in table["fightOffers"]["edges"]:
         fight = edge["node"]
+        for side in ("fighter1", "fighter2"):
+            fighter = fight[side]
+            if fighter["id"] not in profiles:
+                raise RuntimeError(f"Missing source profile for fighter {fighter['id']}")
+            fighter.update(profiles[fighter["id"]])
         node_type, fight_pk = base64.b64decode(fight["id"]).decode().split(":", 1)
         if node_type != "FightOfferTableNode" or not fight_pk.isdigit():
             raise ValueError(f"Unexpected FightOdds fight identity: {node_type}")
@@ -224,23 +537,24 @@ def scrape_fightodds_v2():
     return df
 
 
-# Main execution
-try:
-    fightodds_data = scrape_fightodds_v2()
-    if not fightodds_data.empty:
-        fightodds_file = os.path.join(
-            script_dir, "data",
-            f"ufc_odds_fightoddsio_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-        )
-        os.makedirs(os.path.dirname(fightodds_file), exist_ok=True)
-        fightodds_data.to_csv(fightodds_file, index=False)
-        print("FightOdds data scraped and saved.")
-    else:
-        raise RuntimeError("FightOdds scrape returned no data; no snapshot saved")
-except Exception as e:
-    print(f"FightOdds scrape failed: {e}")
-    import traceback
-    traceback.print_exc()
-    raise
+if __name__ == "__main__":
+    # Main execution
+    try:
+        fightodds_data = scrape_fightodds_v2()
+        if not fightodds_data.empty:
+            fightodds_file = os.path.join(
+                script_dir, "data",
+                f"ufc_odds_fightoddsio_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+            )
+            os.makedirs(os.path.dirname(fightodds_file), exist_ok=True)
+            fightodds_data.to_csv(fightodds_file, index=False)
+            print("FightOdds data scraped and saved.")
+        else:
+            raise RuntimeError("FightOdds scrape returned no data; no snapshot saved")
+    except Exception as e:
+        print(f"FightOdds scrape failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
-print("UFC cron script finished (v2 - API)")
+    print("UFC cron script finished (v2 - API)")
